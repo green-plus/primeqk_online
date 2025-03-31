@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>虚無オンライン</title>
+    <style>
+        #chat-box { border: 1px solid #ccc; width: 300px; height: 150px; overflow-y: scroll; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="state-room-list">
+    <h2>部屋一覧</h2>
+    <div id="rooms"></div>
+</div>
+
+<div id="state-in-room" style="display:none;">
+    <h2 id="current-room"></h2>
+    <div>
+        状態: <span id="player-status">観戦中</span>
+        <button id="status-btn">参加する</button>
+        <button id="start-btn" style="display:none;">開始する</button>
+        <button id="leave-btn">退室する</button>
+    </div>
+    <div>参加者一覧: <span id="player-list"></span></div>
+    <div id="chat">
+        <input id="chat-input" type="text">
+        <button id="chat-btn">送信</button>
+        <div id="chat-box"></div>
+    </div>
+</div>
+
+<div id="state-playing" style="display:none;">
+    <h2>対戦中</h2>
+    <div id="game-area">ゲームの処理（未実装）</div>
+</div>
+
+<script>
+const ws = new WebSocket("wss://web-production-c8e68.up.railway.app/ws");
+let currentRoom = null;
+let roomCounts = {};
+let isWaiting = false;
+let playerId = null;
+
+ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === "room_counts") {
+        roomCounts = msg.counts;
+        updateRoomDisplay();
+    }
+    else if (msg.type === "your_id") {
+        playerId = msg.id;
+    }
+    else if (msg.type === "update_room") {
+        roomCounts[msg.room_id] = msg.count;
+        updateRoomDisplay();
+
+        if (currentRoom === msg.room_id) {
+            const playerList = msg.player_list.map(p => {
+                let text = p.id.toString();
+                if (p.id === playerId) text += "(自分)";
+                if (p.status === "waiting") text = "*" + text;
+                return text;
+            }).join(", ");
+            document.getElementById('player-list').innerText = playerList;
+        }
+    }
+    else if (msg.type === "status_update") {
+        document.getElementById('start-btn').style.display = msg.waiting_count >= 2 && isWaiting ? 'inline' : 'none';
+    }
+    else if (msg.type === "game_start") {
+        setState("playing");
+    }
+    else if (msg.type === "chat") {
+        const chatBox = document.getElementById('chat-box');
+        chatBox.innerHTML += `<div>プレイヤー${msg.sender}: ${msg.message}</div>`;
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+    else if (msg.type === "error") {
+        alert(msg.message);
+    }
+};
+
+function joinRoom(roomId) {
+    ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
+    currentRoom = roomId;
+    document.getElementById('current-room').innerText = `入室中の部屋: ${roomId}`;
+    setState("in-room");
+}
+
+function leaveRoom() {
+    ws.send(JSON.stringify({type: "leave_room"}));
+    currentRoom = null;
+    isWaiting = false;
+    document.getElementById('player-status').innerText = '観戦中';
+    document.getElementById('status-btn').innerText = '参加する';
+    setState("room-list");
+}
+
+function toggleStatus() {
+    isWaiting = !isWaiting;
+    const statusText = isWaiting ? "対戦待ち" : "観戦中";
+    document.getElementById('player-status').innerText = statusText;
+    document.getElementById('status-btn').innerText = isWaiting ? "観戦する" : "参加する";
+    ws.send(JSON.stringify({type: "change_status", status: isWaiting ? "waiting" : "watching"}));
+}
+
+function startGame() {
+    ws.send(JSON.stringify({type: "start_game"}));
+}
+
+function updateRoomDisplay() {
+    const roomsDiv = document.getElementById('rooms');
+    roomsDiv.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+        const roomId = `room_${i}`;
+        const roomEl = document.createElement('div');
+        const count = roomCounts[roomId] || 0;
+        roomEl.innerText = `${roomId} - 人数: ${count}`;
+        const joinBtn = document.createElement('button');
+        joinBtn.innerText = '入室';
+        joinBtn.onclick = () => joinRoom(roomId);
+        roomEl.appendChild(joinBtn);
+        roomsDiv.appendChild(roomEl);
+    }
+}
+
+function setState(state) {
+    document.getElementById('state-room-list').style.display = state === "room-list" ? 'block' : 'none';
+    document.getElementById('state-in-room').style.display = state === "in-room" ? 'block' : 'none';
+    document.getElementById('state-playing').style.display = state === "playing" ? 'block' : 'none';
+}
+
+document.getElementById('status-btn').onclick = toggleStatus;
+document.getElementById('leave-btn').onclick = leaveRoom;
+document.getElementById('start-btn').onclick = startGame;
+document.getElementById('chat-btn').onclick = () => {
+    const chatInput = document.getElementById('chat-input');
+    ws.send(JSON.stringify({type: "chat", message: chatInput.value}));
+    chatInput.value = '';
+};
+
+ws.onopen = () => {
+    ws.send(JSON.stringify({type: "get_room_counts"}));
+    setState("room-list");
+};
+</script>
+</body>
+</html>
