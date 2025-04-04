@@ -46,10 +46,11 @@
           <p>・グロタンカットなし</p>
           <p>・合成数出しなし</p>
           <p>既知のバグ</p>
-          <p>・参加や退出を繰り返すと正常にゲームが進行しなくなります。</p>
+          <p>・対戦中に退出しないでね……</p>
           <p>バージョン</p>
           <p>v0.1 25/03/31 虚無オンライン公開</p>
           <p>v0.2 25/04/03 そすー大富豪オンライン公開</p>
+          <p>v0.3 25/04/05 入退室システムの改善</p>
       </div>
   </div>
 
@@ -136,6 +137,18 @@ ws.onmessage = (event) => {
     }
     else if (msg.type === "status_update") {
         document.getElementById('start-btn').style.display = msg.waiting_count == 2 && isWaiting ? 'inline' : 'none';
+    }
+    else if (msg.type === "state_update") {
+        // サーバ側の room_state に合わせてクライアントの state を更新
+        if (msg.room_state === "waiting") {
+            setState("in-room");
+        } else if (msg.room_state === "playing") {
+            setState("playing");
+        }
+        // 必要になったら current_turn, deck_count, player_list なども更新を検討
+        // document.getElementById('current-turn').innerText = msg.current_turn;
+        // document.getElementById('deck-count').innerText = msg.deck_count;
+        // player_list の更新処理もここに追加
     }
     else if (msg.type === "game_start") {
         // ゲーム開始時に初期のターン表示を設定
@@ -225,7 +238,7 @@ function joinRoom(roomId) {
     ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
     currentRoom = roomId;
     document.getElementById('current-room').innerText = `入室中の部屋: ${roomId}`;
-    setState("in-room");
+    // 状態更新はサーバーからの state_update メッセージで行う
 }
 
 function leaveRoom() {
@@ -330,8 +343,13 @@ function setState(state) {
         document.getElementById('state-common').style.display = 'block';
         document.getElementById('state-game').style.display = 'none';
         document.getElementById('chat').style.display = 'block';
-        // 状態表示やボタンは入室中向けに設定
-        document.getElementById('player-status').innerText = '観戦中';
+
+        // プレイヤーの参加意思（isWaiting）に基づいて表示を変更
+        if (isWaiting) {
+            document.getElementById('player-status').innerText = '対戦待ち';
+        } else {
+            document.getElementById('player-status').innerText = '観戦中';
+        }
         document.getElementById('status-btn').style.display = 'inline';
         document.getElementById('start-btn').style.display = 'none';
     } else if (state === "playing") {
@@ -339,12 +357,27 @@ function setState(state) {
         document.getElementById('state-common').style.display = 'block';
         document.getElementById('state-game').style.display = 'block';
         document.getElementById('chat').style.display = 'block';
-        // 対戦中はボタンの一部を隠す、または状態表示を更新
+
+        // 対戦中でも、プレイヤーが対戦参加者なら「対戦中」、観戦者なら「観戦中」と表示
+        if (isWaiting) {
+            document.getElementById('player-status').innerText = '対戦中';
+            // 参加者は操作可能なので、ボタンを表示
+            document.getElementById('play-btn').style.display = 'inline';
+            document.getElementById('draw-btn').style.display = 'inline';
+            document.getElementById('pass-btn').style.display = 'inline';
+        } else {
+            document.getElementById('player-status').innerText = '観戦中';
+            // 観戦者は操作できないので、操作ボタンを隠す
+            document.getElementById('play-btn').style.display = 'none';
+            document.getElementById('draw-btn').style.display = 'none';
+            document.getElementById('pass-btn').style.display = 'none';
+        }
+        // 共通部分の参加・開始ボタンは不要
         document.getElementById('status-btn').style.display = 'none';
         document.getElementById('start-btn').style.display = 'none';
-        document.getElementById('player-status').innerText = '対戦中';
     }
 }
+
 
 </script>
 </body>
