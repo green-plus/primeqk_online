@@ -50,6 +50,7 @@
           <p>既知の問題</p>
           <p>・systemによるメッセージが「プレイヤーsystem」と表示されます</p>
           <p>・対戦中に退出したときの処理が不安定です</p>
+          <p>・対戦終了後、再戦するには一度「観戦する」を押す必要があります</p>
           <p>バージョン</p>
           <p>v0.1 25/03/31 虚無オンライン公開</p>
           <p>v0.2 25/04/03 そすー大富豪オンライン公開</p>
@@ -103,7 +104,7 @@
 
 <script>
 const ws = new WebSocket("wss://web-production-c8e68.up.railway.app/ws");
-// const ws = new WebSocket("ws://localhost:8000/ws");
+//const ws = new WebSocket("ws://localhost:8000/ws");
 
 let currentRoom = null;
 let roomCounts = {};
@@ -325,7 +326,15 @@ document.getElementById('chat-btn').onclick = () => {
     ws.send(JSON.stringify({type: "chat", message: chatInput.value}));
     chatInput.value = '';
 };
-
+document.getElementById('chat-input').addEventListener('keydown', (event) => {
+    if (event.key === "Enter") {
+        event.preventDefault(); // Enterキーでの改行を防ぐ
+        const chatInput = document.getElementById('chat-input');
+        if (chatInput.value.trim() !== '') { // 空でなければ送信
+            document.getElementById('chat-btn').click();
+        }
+    }
+});
 document.getElementById('play-btn').onclick = playCards;
 document.getElementById('draw-btn').onclick = drawCard;
 document.getElementById('pass-btn').onclick = passTurn;
