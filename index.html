@@ -38,19 +38,23 @@
           」を参考に開発された、素数大富豪の対戦プラットフォームです。</p>
           <p>2025年の札幌杯で開催されたシマエナガリーグにならい、5枚の手札と1枚のペナルティという初心者向けの
           ルールが実装されています。</p>
-          <p>仕様（素数大富豪オンラインとの違い）</p>
-          <p>・2人対戦のみ</p>
+          <p>ルール</p>
+          <p>・2人対戦のみ（それ以外の人数では開始できません）</p>
           <p>・配られる手札は5枚</p>
-          <p>・ペナルティは1枚</p>
+          <p>・ペナルティは常に1枚</p>
           <p>・ジョーカーなし</p>
           <p>・グロタンカットなし</p>
           <p>・合成数出しなし</p>
-          <p>既知のバグ</p>
-          <p>・対戦中に退出しないでね……</p>
+          <p>仕様</p>
+          <p>・選択中のカードをもう一度クリックすると戻せます</p>
+          <p>既知の問題</p>
+          <p>・systemによるメッセージが「プレイヤーsystem」と表示されます</p>
+          <p>・対戦中に退出したときの処理が不安定です</p>
           <p>バージョン</p>
           <p>v0.1 25/03/31 虚無オンライン公開</p>
           <p>v0.2 25/04/03 そすー大富豪オンライン公開</p>
           <p>v0.3 25/04/05 入退室システムの改善</p>
+          <p>v0.4 25/04/07 行動ログを追加</p>
       </div>
   </div>
 
@@ -99,6 +103,8 @@
 
 <script>
 const ws = new WebSocket("wss://web-production-c8e68.up.railway.app/ws");
+// const ws = new WebSocket("ws://localhost:8000/ws");
+
 let currentRoom = null;
 let roomCounts = {};
 let isWaiting = false;
@@ -202,10 +208,7 @@ ws.onmessage = (event) => {
         document.getElementById('field-number').innerText = fieldNumber;
 
         // ゲーム終了時の処理
-        const chatBox = document.getElementById('chat-box');
-        const resultMsg = msg.winner === playerId ? "あなたの勝ちです！" : "あなたの負けです。";
-        chatBox.innerHTML += `<div class=\"system-message\">${resultMsg}</div>`;
-        chatBox.scrollTop = chatBox.scrollHeight;
+        // ログはlog_chatで送信
         setState("in-room");
     }
     else if (msg.type === "chat") {
