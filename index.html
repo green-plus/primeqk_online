@@ -130,7 +130,8 @@ ws.onmessage = (event) => {
     else if (msg.type === "your_id") {
         playerId = msg.id;
     }
-    else if (msg.type === "update_room") {
+    else if (msg.type === "update_room_status") {
+        // playerが部屋に入っているか、対戦か観戦かに限って更新
         roomCounts[msg.room_id] = msg.count;
         updateRoomDisplay();
 
@@ -143,21 +144,18 @@ ws.onmessage = (event) => {
             }).join(", ");
             document.getElementById('player-list').innerText = playerList;
         }
-    }
-    else if (msg.type === "status_update") {
+        // 人の出入りがあったとき、ゲーム開始時に実行
+        // 開始ボタンの表示にのみ関与
         document.getElementById('start-btn').style.display = msg.waiting_count == 2 && isWaiting ? 'inline' : 'none';
     }
-    else if (msg.type === "state_update") {
+    else if (msg.type === "room_state_initialization") {
+        // 入室時にのみ実行
         // サーバ側の room_state に合わせてクライアントの state を更新
         if (msg.room_state === "waiting") {
             setState("in-room");
         } else if (msg.room_state === "playing") {
             setState("playing");
         }
-        // 必要になったら current_turn, deck_count, player_list なども更新を検討
-        // document.getElementById('current-turn').innerText = msg.current_turn;
-        // document.getElementById('deck-count').innerText = msg.deck_count;
-        // player_list の更新処理もここに追加
     }
     else if (msg.type === "game_start") {
         // ゲーム開始時に初期のターン表示を設定
@@ -168,6 +166,15 @@ ws.onmessage = (event) => {
         // 初期手札を受け取る
         myHand = msg.your_hand;
         renderHand();
+    }
+    else if (msg.type === "game_update") {
+      　// action_result, penaltyなどの統合
+        // 現在のターン、デッキ枚数、場のカードの更新
+        document.getElementById('current-turn').innerText = msg.current_turn;
+        document.getElementById('deck-count').innerText = msg.deck_count;
+        document.getElementById('field-number').innerText = msg.field.length > 0
+            ? msg.field.map(c => `${c.suit}${c.rank}`).join(" ")
+            : "(未設定)";
     }
     else if (msg.type === "action_result") {
         // 誰かがカードを出した
@@ -244,7 +251,7 @@ function joinRoom(roomId) {
     ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
     currentRoom = roomId;
     document.getElementById('current-room').innerText = `入室中の部屋: ${roomId}`;
-    // 状態更新はサーバーからの state_update メッセージで行う
+    // 状態更新はサーバーからの room_state_initialization メッセージで行う
 }
 
 function leaveRoom() {
