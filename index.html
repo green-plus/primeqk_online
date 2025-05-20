@@ -168,34 +168,25 @@ ws.onmessage = (event) => {
         renderHand();
     }
     else if (msg.type === "game_update") {
-      　// action_result, penaltyなどの統合
+      　// action_result, penalty, passの統合
         // 現在のターン、デッキ枚数、場のカードの更新
         document.getElementById('current-turn').innerText = msg.current_turn;
         document.getElementById('deck-count').innerText = msg.deck_count;
-        document.getElementById('field-number').innerText = msg.field.length > 0
+        fieldNumber = msg.field.length > 0
             ? msg.field.map(c => `${c.suit}${c.rank}`).join(" ")
             : "(未設定)";
+        document.getElementById('field-number').innerText = fieldNumber;
     }
     else if (msg.type === "action_result") {
-        // 誰かがカードを出した
         if (msg.action === "play_card") {
-            // 場に出されたカードの数を表示
-            fieldNumber = msg.number;
-            document.getElementById('field-number').innerText = fieldNumber;
             console.log("play_card: ", msg);
         }
         else if (msg.action === "pass") {
-            // 2人対戦なのでパスとペナルティは1回で場が流れる
-            fieldNumber = "(未設定)";
-            document.getElementById('field-number').innerText = fieldNumber;
+            console.log("Pass", msg);
         }
     }
     else if (msg.type === "penalty") {
-        // 素数でない数を出したときのペナルティ通知
         console.log("Penalty!", msg);
-        // 2人対戦なのでパスとペナルティは1回で場が流れる
-        fieldNumber = "(未設定)";
-        document.getElementById('field-number').innerText = fieldNumber;
     }
     else if (msg.type === "hand_update") {
         // ドローや他の操作で手札が更新された
