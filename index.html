@@ -55,9 +55,10 @@
           <p>バージョン</p>
           <p>v0.1 25/03/31 虚無オンライン公開</p>
           <p>v0.2 25/04/03 そすー大富豪オンライン公開</p>
-          <p>v0.3 25/04/05 入退室システムの改善</p>
+          <p>v0.3 25/04/05 入退室システムを改善</p>
           <p>v0.4 25/04/07 行動ログを追加</p>
           <p>v0.5 25/04/12 カードの並べ替えを設定</p>
+          <p>v0.6 25/05/20 枚数表示を改善</P>
       </div>
   </div>
 
@@ -83,7 +84,8 @@
     <!-- ゲーム状況表示 -->
     <div id="game-status" style="margin-top:10px;">
         場の数: <span id="field-number">(未設定)</span><br>
-        山札の枚数: <span id="deck-count">0</span>
+        山札の枚数: <span id="deck-count">(未設定)</span><br>
+        手札枚数: <span id="hand-counts">(未設定)</span>
     </div>
 
     <!-- 手札表示エリア -->
@@ -172,10 +174,15 @@ ws.onmessage = (event) => {
         // 現在のターン、デッキ枚数、場のカードの更新
         document.getElementById('current-turn').innerText = msg.current_turn;
         document.getElementById('deck-count').innerText = msg.deck_count;
+        // スートは抜いて数を半角スペース区切りで繋げる
         fieldNumber = msg.field.length > 0
-            ? msg.field.map(c => `${c.suit}${c.rank}`).join(" ")
+            ? msg.field.map(c => `${c.rank}`).join(" ")
             : "(未設定)";
         document.getElementById('field-number').innerText = fieldNumber;
+        const handCounts = msg.hand_counts
+            .map(h => `${h.id}: ${h.count}枚`)
+            .join("  ");
+        document.getElementById('hand-counts').innerText = handCounts;
     }
     else if (msg.type === "action_result") {
         if (msg.action === "play_card") {
@@ -197,11 +204,6 @@ ws.onmessage = (event) => {
         // ターン表示の更新
         document.getElementById('current-turn').innerText = msg.current_turn;
         console.log("Next turn = ", msg.current_turn);
-
-        // 山札の枚数の更新（deck_countが含まれている場合）
-        if (msg.deck_count !== undefined) {
-            document.getElementById('deck-count').innerText = msg.deck_count;
-        }
     }
     else if (msg.type === "game_over") {
         // 場をリセットしておく
