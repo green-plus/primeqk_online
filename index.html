@@ -6,8 +6,8 @@
     <style>
         #chat-box {
             border: 1px solid #ccc;
-            width: 300px;
-            height: 150px;
+            width: 450px;
+            height: 300px;
             overflow-y: scroll;
             margin-top: 10px;
         }
@@ -23,6 +23,31 @@
         #selected-cards {
             margin-bottom: 10px;
         }
+
+        @keyframes rainbow {
+          0%   { background-position: 0% 50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+
+        .rainbow-text {
+          /* 1. 横方向の虹グラデーション */
+          background: linear-gradient(
+            90deg,
+            red, orange, yellow, green, blue, indigo, violet
+          );
+          /* グラデーション領域を4倍に拡大 */
+          background-size: 400%;
+          /* テキストに背景をクリップ */
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          /* アニメーション設定 */
+          animation: rainbow 5s linear infinite;
+          font-weight: bold;
+          /* フォールバック: 古いブラウザ用にテキストの色も指定可 */
+          color: red;
+        }
+
     </style>
 </head>
 <body>
@@ -43,14 +68,13 @@
           <p>・配られる手札は5枚</p>
           <p>・ペナルティは常に1枚</p>
           <p>・ジョーカーなし</p>
-          <p>・グロタンカットなし</p>
+          <p>・<span class="rainbow-text">グロタンカットあり</span></p>
           <p>・合成数出しなし</p>
           <p>仕様</p>
           <p>・選択中のカードをもう一度クリックすると戻せます</p>
           <p>既知の問題</p>
           <p>・systemによるメッセージが「プレイヤーsystem」と表示されます</p>
-          <p>・対戦中に退出したときの処理が不安定です</p>
-          <p>・対戦終了後、再戦するには一度「観戦する」を押す必要があります</p>
+          <p>・対戦中に退出したときの処理が不安定です（改善しています）</p>
           <p>・前の試合の[出す予定のカード]が適切にリセットされません（一度出そうとすると直ります）</p>
           <p>バージョン</p>
           <p>v0.1 25/03/31 虚無オンライン公開</p>
@@ -59,6 +83,7 @@
           <p>v0.4 25/04/07 行動ログを追加</p>
           <p>v0.5 25/04/12 カードの並べ替えを設定</p>
           <p>v0.6 25/05/20 枚数表示を改善</P>
+          <p>v0.7 25/05/21 <span class="rainbow-text">グロタンカット</span>を追加</P>
       </div>
   </div>
 
