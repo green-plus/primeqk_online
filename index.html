@@ -56,6 +56,12 @@
   <div id="state-room-list">
       <h2>部屋一覧</h2>
       <div id="rooms"></div>
+      <div id="name-prompt">
+        <label for="name-input">あなたの名前：</label>
+        <input id="name-input" type="text" placeholder="名前を入力" />
+        <button id="name-btn">決定</button>
+      </div>
+      <div id="your-name-display" style="margin: 8px 0; font-weight: bold;"></div>
       <div id="room-description">
           <p>そすー大富豪オンラインへようこそ！</p>
           <p>そすー大富豪オンラインはpermil氏の「
@@ -73,7 +79,6 @@
           <p>仕様</p>
           <p>・選択中のカードをもう一度クリックすると戻せます</p>
           <p>既知の問題</p>
-          <p>・systemによるメッセージが「プレイヤーsystem」と表示されます</p>
           <p>・対戦中に退出したときの処理が不安定です（改善しています）</p>
           <p>・前の試合の[出す予定のカード]が適切にリセットされません（一度出そうとすると直ります）</p>
           <p>バージョン</p>
@@ -84,6 +89,7 @@
           <p>v0.5 25/04/12 カードの並べ替えを設定</p>
           <p>v0.6 25/05/20 枚数表示を改善</P>
           <p>v0.7 25/05/21 <span class="rainbow-text">グロタンカット</span>を追加</P>
+          <p>v0.8 25/05/22 プレイヤー名を追加</P>
       </div>
   </div>
 
@@ -139,6 +145,7 @@ let currentRoom = null;
 let roomCounts = {};
 let isWaiting = false;
 let playerId = null;
+let playerName = null;
 
 // ゲーム状態
 let fieldNumber = "(未設定)";
@@ -164,7 +171,7 @@ ws.onmessage = (event) => {
 
         if (currentRoom === msg.room_id) {
             const playerList = msg.player_list.map(p => {
-                let text = p.id.toString();
+                let text = p.name.toString();
                 if (p.id === playerId) text += "(自分)";
                 if (p.status === "waiting") text = "*" + text;
                 return text;
@@ -185,8 +192,8 @@ ws.onmessage = (event) => {
         }
     }
     else if (msg.type === "game_start") {
-        // ゲーム開始時に初期のターン表示を設定
-        document.getElementById('current-turn').innerText = msg.current_turn;
+        // ゲーム開始
+        // ターンは game_update で更新
         setState("playing");
     }
     else if (msg.type === "deal") {
@@ -205,7 +212,7 @@ ws.onmessage = (event) => {
             : "(未設定)";
         document.getElementById('field-number').innerText = fieldNumber;
         const handCounts = msg.hand_counts
-            .map(h => `${h.id}: ${h.count}枚`)
+            .map(h => `${h.name}: ${h.count}枚`)
             .join("  ");
         document.getElementById('hand-counts').innerText = handCounts;
     }
@@ -241,7 +248,7 @@ ws.onmessage = (event) => {
     }
     else if (msg.type === "chat") {
         const chatBox = document.getElementById('chat-box');
-        chatBox.innerHTML += `<div>プレイヤー${msg.sender}: ${msg.message}</div>`;
+        chatBox.innerHTML += `<div>${msg.sender}: ${msg.message}</div>`;
         chatBox.scrollTop = chatBox.scrollHeight;
     }
     else if (msg.type === "error") {
@@ -344,6 +351,21 @@ function passTurn() {
 }
 
 // ボタンのイベントハンドラ設定
+// 名前決定ボタン
+document.getElementById('name-btn').onclick = () => {
+    const input = document.getElementById('name-input');
+    const name = input.value.trim();
+    if (!name) {
+      alert("名前を入力してください");
+      return;
+    }
+    playerName = name;
+    // WSがオープンしたら送る or すぐ送れるなら即送信
+    ws.send(JSON.stringify({ type: "set_name", name }));
+    // 入力欄を隠して次のUIへ
+    document.getElementById('your-name-display').innerText = `あなたの名前：${playerName}`;
+    document.getElementById('name-prompt').style.display = 'none';
+};
 
 document.getElementById('status-btn').onclick = toggleStatus;
 document.getElementById('leave-btn').onclick = leaveRoom;
