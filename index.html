@@ -16,6 +16,12 @@
             margin: 2px;
             cursor: pointer;
         }
+        #field-number.revolution {
+            background-color: black;
+            color: white;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
         /* 上段（出す予定のカード）と下段（手札） */
         #hand-area {
             margin-top: 10px;
@@ -54,7 +60,7 @@
 
   <!-- 部屋一覧 -->
   <div id="state-room-list">
-      <h2>部屋一覧</h2>
+      <h2>そすー大富豪オンライン</h2>
       <div id="rooms"></div>
       <div id="name-prompt">
         <label for="name-input">あなたの名前：</label>
@@ -82,14 +88,18 @@
           <p>・対戦中に退出したときの処理が不安定です（改善しています）</p>
           <p>・前の試合の[出す予定のカード]が適切にリセットされません（一度出そうとすると直ります）</p>
           <p>バージョン</p>
-          <p>v0.1 25/03/31 虚無オンライン公開</p>
-          <p>v0.2 25/04/03 そすー大富豪オンライン公開</p>
-          <p>v0.3 25/04/05 入退室システムを改善</p>
-          <p>v0.4 25/04/07 行動ログを追加</p>
-          <p>v0.5 25/04/12 カードの並べ替えを設定</p>
-          <p>v0.6 25/05/20 枚数表示を改善</P>
-          <p>v0.7 25/05/21 <span class="rainbow-text">グロタンカット</span>を追加</P>
-          <p>v0.8 25/05/22 プレイヤー名を追加</P>
+          <ul>
+              <li>v0.1 25/03/31 虚無オンライン公開</li>
+              <li>v0.2 25/04/03 そすー大富豪オンライン公開</li>
+              <li>v0.3 25/04/05 入退室システムを改善</li>
+              <li>v0.4 25/04/07 行動ログを追加</li>
+              <li>v0.5 25/04/12 カードの並べ替えを設定</li>
+              <li>v0.6 25/05/20 枚数表示を改善</li>
+              <li>v0.7 25/05/21 <span class="rainbow-text">グロタンカット</span>を追加</li>
+              <li>v0.8 25/05/22 プレイヤー名を追加</li>
+              <li>v1.0 25/05/26 ジョーカーを追加、デザインを調整、完成報告</li>
+              <!-- <li></li> -->
+          </ul>
       </div>
   </div>
 
@@ -117,6 +127,11 @@
         場の数: <span id="field-number">(未設定)</span><br>
         山札の枚数: <span id="deck-count">(未設定)</span><br>
         手札枚数: <span id="hand-counts">(未設定)</span>
+    </div>
+
+    <div id="joker-rank-selector" style="display:none; margin-top:8px;">
+        ジョーカー指定:
+        <div id="joker-selectors-container"></div>
     </div>
 
     <!-- 手札表示エリア -->
@@ -153,6 +168,15 @@ let fieldNumber = "(未設定)";
 // 手札関連
 let myHand = [];
 let selectedCards = [];
+let jokerAssignedRanks = [];  // ジョーカー指定を配列で保持
+
+const suitSymbols = {
+  'H': '♡',  // 白抜きハート (U+2661)
+  'D': '♢',  // 白抜きダイヤ (U+2662)
+  'C': '♣',  // 黒塗りクラブ (U+2663)
+  'S': '♠',  // 黒塗りスペード (U+2660)
+  'X': '★'   // 黒塗り星（ジョーカー）(U+2605)
+};
 
 ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -207,10 +231,19 @@ ws.onmessage = (event) => {
         document.getElementById('current-turn').innerText = msg.current_turn;
         document.getElementById('deck-count').innerText = msg.deck_count;
         // スートは抜いて数を半角スペース区切りで繋げる
-        fieldNumber = msg.field.length > 0
-            ? msg.field.map(c => `${c.rank}`).join(" ")
+        const fieldEl = document.getElementById('field-number');
+        fieldEl.innerText = msg.field.length > 0
+            ? msg.field
+                .map(c => c.suit === 'X' ? 'X' : c.rank)
+                .join(' ')
             : "(未設定)";
-        document.getElementById('field-number').innerText = fieldNumber;
+
+        // ★革命中なら .revolution を付与、それ以外は外す
+        if (msg.revolution) {
+            fieldEl.classList.add('revolution');
+        } else {
+            fieldEl.classList.remove('revolution');
+        }
         const handCounts = msg.hand_counts
             .map(h => `${h.name}: ${h.count}枚`)
             .join("  ");
@@ -275,7 +308,7 @@ function updateRoomDisplay() {
 function joinRoom(roomId) {
     ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
     currentRoom = roomId;
-    document.getElementById('current-room').innerText = `入室中の部屋: ${roomId}`;
+    document.getElementById('current-room').innerText = `入室中: ${roomId}`;
     // 状態更新はサーバーからの room_state_initialization メッセージで行う
 }
 
@@ -304,41 +337,115 @@ function startGame() {
 function renderHand() {
     const myHandDiv = document.getElementById('my-hand');
     myHandDiv.innerHTML = '';
-    myHand.forEach((card, idx) => {
+    let jokerCount = 0;
+    myHand.forEach(card => {
+        const isSelected = selectedCards.some(c => c.card_id === card.card_id);
         const btn = document.createElement('button');
         btn.className = 'card-button';
-        btn.innerText = `${card.suit}${card.rank}`;
-        // クリックでselectedに追加/削除
-        btn.onclick = () => {
-            toggleSelect(card);
-        };
+
+        // 表示用のスート記号
+        const symbol = suitSymbols[card.suit] || card.suit;
+        if (card.is_joker && isSelected) {
+            // 選択中のジョーカーは指定ランクを表示
+            const rank = jokerAssignedRanks[jokerCount++] || "∞";
+            btn.innerText = `★${rank === 'inf' ? '∞' : rank}`;
+        }
+        else if (card.is_joker) {
+            // 未選択のジョーカーは「?」をランクとして表示
+            btn.innerText = `${symbol}?`;
+        }
+        else {
+            // 通常カード
+            btn.innerText = `${symbol}${card.rank}`;
+        }
+
+        btn.onclick = () => toggleSelect(card);
         myHandDiv.appendChild(btn);
     });
-    document.getElementById('selected-list').innerText = selectedCards.map(c=>`${c.suit}${c.rank}`).join(' ');
+
+    document.getElementById('selected-list').innerText = selectedCards.map(c => {
+        if (c.is_joker) {
+            const idx = selectedCards.filter(x=>x.is_joker).indexOf(c);
+            const rank = jokerAssignedRanks[idx] || "∞";
+            return rank === 'inf' ? 'X∞' : `X${rank}`;
+        }
+        return `${c.suit}${c.rank}`;
+    }).join(' ');
 }
+
 
 function toggleSelect(card) {
-    // 選択済みにあるかチェック
-    const idx = selectedCards.findIndex(c => c.suit===card.suit && c.rank===card.rank);
+    const idx = selectedCards.findIndex(c => c.card_id === card.card_id);
     if (idx >= 0) {
-        // 既に選択されてたら外す
         selectedCards.splice(idx, 1);
     } else {
-        // 選択されてなかったら追加
         selectedCards.push(card);
     }
-    // 再描画
-    document.getElementById('selected-list').innerText = selectedCards.map(c=>`${c.suit}${c.rank}`).join(' ');
+    updateJokerSelectors();  // ←毎回セレクター表示更新を呼ぶ
+    renderHand();
 }
 
+function updateJokerSelectors() {
+    const jokerCards = selectedCards.filter(c => c.is_joker);
+    const container = document.getElementById('joker-selectors-container');
+    container.innerHTML = '';
+    jokerAssignedRanks = [];
+
+    if (jokerCards.length === 0) {
+        document.getElementById('joker-rank-selector').style.display = 'none';
+        return;
+    }
+
+    document.getElementById('joker-rank-selector').style.display = 'block';
+
+    jokerCards.forEach((joker, index) => {
+        const selector = document.createElement('select');
+        selector.innerHTML = `
+            <option value="inf">∞（場を流す）</option>
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <option value="11">11</option>
+            <option value="12">12</option>
+            <option value="13">13</option>
+        `;
+        selector.onchange = function() {
+            jokerAssignedRanks[index] = this.value;
+            renderHand();
+        };
+        container.appendChild(document.createTextNode(`ジョーカー${index+1}枚目: `));
+        container.appendChild(selector);
+        container.appendChild(document.createElement('br'));
+        // デフォルトは∞でセット
+        jokerAssignedRanks[index] = "inf";
+    });
+}
+
+
 function playCards() {
-    // 選択されたカードをサーバに送る
+    const jokerCount = selectedCards.filter(c => c.is_joker).length;
+    if (jokerAssignedRanks.length !== jokerCount) {
+        alert('ジョーカーの数を指定してください');
+        return;
+    }
+
     ws.send(JSON.stringify({
         type: "play_card",
-        cards: selectedCards
+        cards: selectedCards,
+        assigned_numbers: jokerAssignedRanks  // 配列で送る
     }));
-    // 送信後、選択クリア
+
     selectedCards = [];
+    jokerAssignedRanks = [];
+    updateJokerSelectors();
     renderHand();
 }
 
