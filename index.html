@@ -89,6 +89,7 @@
           <p>既知の問題</p>
           <p>・対戦中に退出したときの処理が不安定です（改善しています）</p>
           <p>・前の試合の[出す予定のカード]が適切にリセットされません（一度出そうとすると直ります）</p>
+          <p>・手札が増えたときに選択中のカードが分かりづらいので次のバージョンで改善します……！</p>
           <p>バージョン</p>
           <ul>
               <li>v0.1 25/03/31 虚無オンライン公開</li>
@@ -100,6 +101,7 @@
               <li>v0.7 25/05/21 <span class="rainbow-text">グロタンカット</span>を追加</li>
               <li>v0.8 25/05/22 プレイヤー名を追加</li>
               <li>v1.0 25/05/26 ジョーカーを追加、デザインを調整、完成報告</li>
+              <li>v1.1 25/10/02 ルールバリエーションを追加、山札への流しを追加、素数判定を改善</li>
               <!-- <li></li> -->
           </ul>
       </div>
@@ -160,6 +162,7 @@ const ws = new WebSocket("wss://web-production-c8e68.up.railway.app/ws");
 
 let currentRoom = null;
 let roomCounts = {};
+let roomRules = {};
 let isWaiting = false;
 let playerId = null;
 let playerName = null;
@@ -185,6 +188,7 @@ ws.onmessage = (event) => {
 
     if (msg.type === "room_counts") {
         roomCounts = msg.counts;
+          if (msg.rules) roomRules = msg.rules; // ここで初期化
         updateRoomDisplay();
     }
     else if (msg.type === "your_id") {
@@ -193,6 +197,7 @@ ws.onmessage = (event) => {
     else if (msg.type === "update_room_status") {
         // playerが部屋に入っているか、対戦か観戦かに限って更新
         roomCounts[msg.room_id] = msg.count;
+        roomRules[msg.room_id]  = msg.rule;   // 受け取る
         updateRoomDisplay();
 
         if (currentRoom === msg.room_id) {
@@ -228,7 +233,7 @@ ws.onmessage = (event) => {
         renderHand();
     }
     else if (msg.type === "game_update") {
-      　// action_result, penalty, passの統合
+        // action_result, penalty, passの統合
         // 現在のターン、デッキ枚数、場のカードの更新
         document.getElementById('current-turn').innerText = msg.current_turn;
         document.getElementById('deck-count').innerText = msg.deck_count;
@@ -298,7 +303,7 @@ function updateRoomDisplay() {
         const roomId = `room_${i}`;
         const roomEl = document.createElement('div');
         const count = roomCounts[roomId] || 0;
-        roomEl.innerText = `${roomId} - 人数: ${count}`;
+        roomEl.innerText = `${roomId} (${roomRules[roomId]}) - 人数:${count}`;
         const joinBtn = document.createElement('button');
         joinBtn.innerText = '入室';
         joinBtn.onclick = () => joinRoom(roomId);
