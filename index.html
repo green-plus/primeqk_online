@@ -140,7 +140,10 @@
 
     <!-- 手札表示エリア -->
     <div id="hand-area">
-        <div id="selected-cards">[ 出す予定のカード: <span id="selected-list"></span> ]</div>
+        <div id="selected-cards" style="margin-bottom:10px;">
+            [ 出す予定のカード: ]
+            <div id="selected-row"></div>
+        </div>
         <div>手札:</div>
         <div id="my-hand"></div>
         <button id="play-btn">出す</button>
@@ -342,43 +345,54 @@ function startGame() {
 
 // 手札を描画
 function renderHand() {
-    const myHandDiv = document.getElementById('my-hand');
-    myHandDiv.innerHTML = '';
-    let jokerCount = 0;
-    myHand.forEach(card => {
-        const isSelected = selectedCards.some(c => c.card_id === card.card_id);
-        const btn = document.createElement('button');
-        btn.className = 'card-button';
+  const myHandDiv = document.getElementById('my-hand');
+  const selectedRow = document.getElementById('selected-row');
+  myHandDiv.innerHTML = '';
+  selectedRow.innerHTML = '';
 
-        // 表示用のスート記号
-        const symbol = suitSymbols[card.suit] || card.suit;
-        if (card.is_joker && isSelected) {
-            // 選択中のジョーカーは指定ランクを表示
-            const rank = jokerAssignedRanks[jokerCount++] || "∞";
-            btn.innerText = `★${rank === 'inf' ? '∞' : rank}`;
-        }
-        else if (card.is_joker) {
-            // 未選択のジョーカーは「?」をランクとして表示
-            btn.innerText = `${symbol}?`;
-        }
-        else {
-            // 通常カード
-            btn.innerText = `${symbol}${card.rank}`;
-        }
+  // 選択・未選択で 2 分割
+  const isSelectedId = new Set(selectedCards.map(c => c.card_id));
+  const unselected = myHand.filter(c => !isSelectedId.has(c.card_id));
+  const selected   = myHand.filter(c =>  isSelectedId.has(c.card_id));
 
-        btn.onclick = () => toggleSelect(card);
-        myHandDiv.appendChild(btn);
-    });
+  // ---- 上段：選択中カードをボタンで描画 ----
+  let selJokerIdx = 0;
+  selected.forEach(card => {
+    const btn = document.createElement('button');
+    btn.className = 'card-button';
+    const symbol = suitSymbols[card.suit] || card.suit;
 
-    document.getElementById('selected-list').innerText = selectedCards.map(c => {
-        if (c.is_joker) {
-            const idx = selectedCards.filter(x=>x.is_joker).indexOf(c);
-            const rank = jokerAssignedRanks[idx] || "∞";
-            return rank === 'inf' ? 'X∞' : `X${rank}`;
-        }
-        return `${c.suit}${c.rank}`;
-    }).join(' ');
+    if (card.is_joker) {
+      const rank = jokerAssignedRanks[selJokerIdx++] || "∞";
+      btn.innerText = `★${rank === 'inf' ? '∞' : rank}`;
+    } else {
+      btn.innerText = `${symbol}${card.rank}`;
+    }
+
+    // 上段のカードを押すと「選択解除」＝下段へ戻る
+    btn.onclick = () => toggleSelect(card);
+    selectedRow.appendChild(btn);
+  });
+
+  // ---- 下段：未選択カードをボタンで描画 ----
+  unselected.forEach(card => {
+    const btn = document.createElement('button');
+    btn.className = 'card-button';
+    const symbol = suitSymbols[card.suit] || card.suit;
+
+    if (card.is_joker) {
+      // 未選択 Joker は ? 表示
+      btn.innerText = `${symbol}?`;
+    } else {
+      btn.innerText = `${symbol}${card.rank}`;
+    }
+
+    // 下段のカードを押すと「選択」＝上段へ移動
+    btn.onclick = () => toggleSelect(card);
+    myHandDiv.appendChild(btn);
+  });
 }
+
 
 
 function toggleSelect(card) {
