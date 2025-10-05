@@ -30,6 +30,26 @@
             margin-bottom: 10px;
         }
 
+        #selected-row, #my-hand {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        /* 出す予定のカードが空でも1段ぶんのスペースを確保（ガタつき防止） */
+        #selected-row:empty::before{
+          content: "";
+          display: block;
+          /* だいたい既定ボタン1段相当の高さ。気になる場合は微調整 */
+          height: 2em;
+        }
+
+        /* 手札側も同様に“空のときの高さ”を確保したければ */
+        #my-hand:empty::before{
+          content: "";
+          display: block;
+          height: 2em;
+        }
+
+
         @keyframes rainbow {
           0%   { background-position: 0% 50%; }
           50%  { background-position: 100% 50%; }
@@ -73,8 +93,8 @@
           <p>そすー大富豪オンラインはpermil氏の「
           <span class="link"><a href="https://permil.net/pd/">素数大富豪オンライン</a></span>
           」を参考に開発された、素数大富豪の対戦プラットフォームです。</p>
-          <p>2025年の札幌杯で開催されたシマエナガリーグにならい、5枚の手札と1枚のペナルティという初心者向けの
-          ルールが実装されています。</p>
+          <p>2025年の札幌杯で開催されたシマエナガリーグにならい、5枚の手札と1枚のペナルティという
+            初心者向けのルールが実装されています。</p>
           <p>ルール</p>
           <p>・2人対戦のみ（それ以外の人数では開始できません）</p>
           <p>・配られる手札は5枚</p>
@@ -88,8 +108,7 @@
           <p>・ジョーカーは☆で表示されています</p>
           <p>既知の問題</p>
           <p>・対戦中に退出したときの処理が不安定です（改善しています）</p>
-          <p>・前の試合の[出す予定のカード]が適切にリセットされません（一度出そうとすると直ります）</p>
-          <p>・手札が増えたときに選択中のカードが分かりづらいので次のバージョンで改善します……！</p>
+          <p>・前の試合の選択中カードが適切にリセットされません（一度出そうとすると直ります）</p>
           <p>バージョン</p>
           <ul>
               <li>v0.1 25/03/31 虚無オンライン公開</li>
@@ -140,15 +159,39 @@
 
     <!-- 手札表示エリア -->
     <div id="hand-area">
-        <div id="selected-cards" style="margin-bottom:10px;">
-            [ 出す予定のカード: ]
-            <div id="selected-row"></div>
-        </div>
-        <div>手札:</div>
-        <div id="my-hand"></div>
-        <button id="play-btn">出す</button>
-        <button id="draw-btn">ドロー</button>
-        <button id="pass-btn">パス</button>
+        <!-- 出す予定のカード -->
+        <section id="selected-section">
+          <div class="section-title">出す予定のカード：</div>
+          <div id="selected-row" class="card-row"></div>
+        </section>
+
+        <!-- 合成数場（合成数出しモード時に表示） -->
+        <section id="composite-section" style="display:none;">
+          <div class="section-title">合成数場：</div>
+          <div id="composite-area" class="card-row"></div>
+        </section>
+
+        <!-- 手札 -->
+        <section id="hand-section">
+          <div class="section-title">手札：</div>
+          <div id="my-hand" class="card-row"></div>
+        </section>
+
+        <!-- アクション行 -->
+        <section id="action-row">
+          <button id="play-btn">出す</button>
+          <button id="draw-btn">ドロー</button>
+          <button id="pass-btn">パス</button>
+
+          <!-- 合成数出しトグル。通常時は「合成数出し」を表示、モード中は「キャンセル」を表示 -->
+          <button id="composite-toggle-btn" aria-controls="composite-section">合成数出し</button>
+          <button id="composite-cancel-btn" style="display:none;">キャンセル</button>
+
+          <!-- 合成数用オペレータ（モード中のみ表示） -->
+          <button id="op-mul-btn" data-op="×" style="display:none;">×</button>
+          <button id="op-pow-btn" data-op="^" style="display:none;">^</button>
+        </section>
+
     </div>
 </div>
 
@@ -343,55 +386,46 @@ function startGame() {
     ws.send(JSON.stringify({type: "start_game"}));
 }
 
-// 手札を描画
 function renderHand() {
-  const myHandDiv = document.getElementById('my-hand');
+  const myHandDiv   = document.getElementById('my-hand');
   const selectedRow = document.getElementById('selected-row');
   myHandDiv.innerHTML = '';
   selectedRow.innerHTML = '';
 
-  // 選択・未選択で 2 分割
-  const isSelectedId = new Set(selectedCards.map(c => c.card_id));
-  const unselected = myHand.filter(c => !isSelectedId.has(c.card_id));
-  const selected   = myHand.filter(c =>  isSelectedId.has(c.card_id));
+  // 速度のために id→card の辞書を用意（myHandの最新状態を参照できるように）
+  const byId = new Map(myHand.map(c => [c.card_id, c]));
+  const selectedIdSet = new Set(selectedCards.map(c => c.card_id));
 
-  // ---- 上段：選択中カードをボタンで描画 ----
+  // ---- 上段：selectedCards の“押した順”で描画 ----
   let selJokerIdx = 0;
-  selected.forEach(card => {
+  selectedCards.forEach(sc => {
+    const card = byId.get(sc.card_id) || sc; // 念のため最新に差し替え
     const btn = document.createElement('button');
     btn.className = 'card-button';
     const symbol = suitSymbols[card.suit] || card.suit;
 
     if (card.is_joker) {
-      const rank = jokerAssignedRanks[selJokerIdx++] || "∞";
+      const rank = jokerAssignedRanks[selJokerIdx++] || 'inf';
       btn.innerText = `★${rank === 'inf' ? '∞' : rank}`;
     } else {
       btn.innerText = `${symbol}${card.rank}`;
     }
-
-    // 上段のカードを押すと「選択解除」＝下段へ戻る
-    btn.onclick = () => toggleSelect(card);
+    btn.onclick = () => toggleSelect(card); // クリックで解除→下段へ
     selectedRow.appendChild(btn);
   });
 
-  // ---- 下段：未選択カードをボタンで描画 ----
-  unselected.forEach(card => {
+  // ---- 下段：myHand（サーバのソート順）のうち未選択だけ描画 ----
+  myHand.forEach(card => {
+    if (selectedIdSet.has(card.card_id)) return; // 既に上段に出したものはスキップ
     const btn = document.createElement('button');
     btn.className = 'card-button';
     const symbol = suitSymbols[card.suit] || card.suit;
-
-    if (card.is_joker) {
-      // 未選択 Joker は ? 表示
-      btn.innerText = `${symbol}?`;
-    } else {
-      btn.innerText = `${symbol}${card.rank}`;
-    }
-
-    // 下段のカードを押すと「選択」＝上段へ移動
-    btn.onclick = () => toggleSelect(card);
+    btn.innerText = card.is_joker ? `${symbol}?` : `${symbol}${card.rank}`;
+    btn.onclick = () => toggleSelect(card); // クリックで選択→上段へ
     myHandDiv.appendChild(btn);
   });
 }
+
 
 
 
