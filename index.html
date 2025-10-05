@@ -166,9 +166,10 @@
         </section>
 
         <!-- 合成数場（合成数出しモード時に表示） -->
-        <section id="composite-section" style="display:none;">
+        <section id="composite-wrapper" style="display:none;">
           <div class="section-title">合成数場：</div>
           <div id="composite-area" class="card-row"></div>
+          <div id="composite-joker-selectors"></div>
         </section>
 
         <!-- 手札 -->
@@ -185,11 +186,12 @@
 
           <!-- 合成数出しトグル。通常時は「合成数出し」を表示、モード中は「キャンセル」を表示 -->
           <button id="composite-toggle-btn" aria-controls="composite-section">合成数出し</button>
-          <button id="composite-cancel-btn" style="display:none;">キャンセル</button>
 
           <!-- 合成数用オペレータ（モード中のみ表示） -->
-          <button id="op-mul-btn" data-op="×" style="display:none;">×</button>
-          <button id="op-pow-btn" data-op="^" style="display:none;">^</button>
+          <div id="composite-ops" style="display:none;">
+            <button data-op="×" id="op-mul-btn">×</button>
+            <button data-op="^" id="op-pow-btn">^</button>
+          </div>
         </section>
 
     </div>
@@ -214,12 +216,17 @@ let playerId = null;
 let playerName = null;
 
 // ゲーム状態
-let fieldNumber = "(未設定)";
+// field-numberは直接DOMに
 
 // 手札関連
 let myHand = [];
 let selectedCards = [];
 let jokerAssignedRanks = [];  // ジョーカー指定を配列で保持
+let compositeMode = false;               // 合成数モードON/OFF
+let compositeTokens = [];                // 合成数トークン列（左→右）
+/* 例: [{kind:'card', card_id: 101}, {kind:'op', op:'×'}, {kind:'card', card_id: 202}, ...] */
+let compositeJokerAssign = [];           // 合成数場の Joker 割当（出現順ベース）
+
 
 const suitSymbols = {
   'H': '♡',  // 白抜きハート (U+2661)
@@ -274,8 +281,11 @@ ws.onmessage = (event) => {
         setState("playing");
     }
     else if (msg.type === "deal") {
-        // 初期手札を受け取る
         myHand = msg.your_hand;
+        selectedCards = [];
+        jokerAssignedRanks = [];
+        clearComposite(); // ← 合成数モードごと初期化
+        updateJokerSelectors();
         renderHand();
     }
     else if (msg.type === "game_update") {
@@ -325,8 +335,7 @@ ws.onmessage = (event) => {
     }
     else if (msg.type === "game_over") {
         // 場をリセットしておく
-        fieldNumber = "(未設定)";
-        document.getElementById('field-number').innerText = fieldNumber;
+        document.getElementById('field-number').innerText = "(未設定)";
 
         // ゲーム終了時の処理
         // ログはlog_chatで送信
@@ -334,7 +343,9 @@ ws.onmessage = (event) => {
     }
     else if (msg.type === "chat") {
         const chatBox = document.getElementById('chat-box');
-        chatBox.innerHTML += `<div>${msg.sender}: ${msg.message}</div>`;
+        const line = document.createElement('div');
+        line.textContent = `${msg.sender}: ${msg.message}`;
+        chatBox.appendChild(line);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
     else if (msg.type === "error") {
@@ -395,10 +406,14 @@ function renderHand() {
   // 速度のために id→card の辞書を用意（myHandの最新状態を参照できるように）
   const byId = new Map(myHand.map(c => [c.card_id, c]));
   const selectedIdSet = new Set(selectedCards.map(c => c.card_id));
+  const compositeIdSet = new Set(
+    compositeTokens.filter(t => t.kind === 'card').map(t => t.card_id)
+  );
 
   // ---- 上段：selectedCards の“押した順”で描画 ----
   let selJokerIdx = 0;
   selectedCards.forEach(sc => {
+    if (compositeIdSet.has(sc.card_id)) return; // compositeにあるものはselectedにも出さない
     const card = byId.get(sc.card_id) || sc; // 念のため最新に差し替え
     const btn = document.createElement('button');
     btn.className = 'card-button';
@@ -410,35 +425,213 @@ function renderHand() {
     } else {
       btn.innerText = `${symbol}${card.rank}`;
     }
-    btn.onclick = () => toggleSelect(card); // クリックで解除→下段へ
+    btn.onclick = () => {
+      if (compositeMode) return; // 合成数モード中は上段の選択トグルを無効化
+      toggleSelect(card);
+    };
     selectedRow.appendChild(btn);
   });
 
   // ---- 下段：myHand（サーバのソート順）のうち未選択だけ描画 ----
   myHand.forEach(card => {
     if (selectedIdSet.has(card.card_id)) return; // 既に上段に出したものはスキップ
+    if (compositeIdSet.has(card.card_id)) return; // 合成数場のものも除外
     const btn = document.createElement('button');
     btn.className = 'card-button';
     const symbol = suitSymbols[card.suit] || card.suit;
     btn.innerText = card.is_joker ? `${symbol}?` : `${symbol}${card.rank}`;
-    btn.onclick = () => toggleSelect(card); // クリックで選択→上段へ
+    btn.onclick = (ev) => onHandCardClick(card, ev);
     myHandDiv.appendChild(btn);
   });
 }
 
+function onHandCardClick(card, ev) {
+  if (compositeMode) {
+    // 合成数場へカードを追加（重複防止のため選択からも除去）
+    if (!inComposite(card.card_id) && !inSelected(card.card_id)) {
+      compositeTokens.push({kind:'card', card_id: card.card_id});
+    } else {
+      // すでに選択 or 合成数へ使用中なら移動扱いで最後尾に
+      removeFromSelected(card.card_id);
+      removeFromComposite(card.card_id);
+      compositeTokens.push({kind:'card', card_id: card.card_id});
+    }
+    renderComposite();
+    renderHand();
+  } else {
+    // 通常モードは選択トグル
+    if (inComposite(card.card_id)) removeFromComposite(card.card_id);
+    toggleSelect(card);
+  }
+}
 
-
+function inSelected(id){ return selectedCards.some(c=>c.card_id===id); }
+function inComposite(id){ return compositeTokens.some(t=>t.kind==='card' && t.card_id===id); }
+function removeFromSelected(id){
+  const i = selectedCards.findIndex(c=>c.card_id===id);
+  if (i>=0) selectedCards.splice(i,1);
+}
+function removeFromComposite(id){
+  const i = compositeTokens.findIndex(t=>t.kind==='card' && t.card_id===id);
+  if (i>=0) compositeTokens.splice(i,1);
+}
 
 function toggleSelect(card) {
-    const idx = selectedCards.findIndex(c => c.card_id === card.card_id);
-    if (idx >= 0) {
-        selectedCards.splice(idx, 1);
-    } else {
-        selectedCards.push(card);
-    }
-    updateJokerSelectors();  // ←毎回セレクター表示更新を呼ぶ
+  if (compositeMode) {
+    // 合成数モードでは「選択」ではなく合成数場へ
+    removeFromSelected(card.card_id);
+    removeFromComposite(card.card_id);
+    compositeTokens.push({kind:'card', card_id: card.card_id});
+    renderComposite();
     renderHand();
+    return;
+  }
+
+  const idx = selectedCards.findIndex(c => c.card_id === card.card_id);
+  if (idx >= 0) selectedCards.splice(idx, 1);
+  else selectedCards.push(card);
+
+  updateJokerSelectors();
+  renderHand();
 }
+
+const compositeOps = document.getElementById('composite-ops');
+
+// 2) 表示・非表示トグル
+function showCompositeOps(show) {
+  if (!compositeOps) return;
+  compositeOps.style.display = show ? 'inline-flex' : 'none';
+}
+
+
+const compositeWrapper = document.getElementById('composite-wrapper');
+const compositeToggleBtn = document.getElementById('composite-toggle-btn');
+
+compositeToggleBtn.onclick = () => {
+  if (!compositeMode) {
+    compositeMode = true;
+    compositeWrapper.style.display = '';
+    compositeToggleBtn.innerText = 'キャンセル';
+    showCompositeOps(true);
+  } else {
+    // キャンセル：合成数場をクリアし、使ったカードを未選択へ
+    restoreCardsFromComposite();
+    clearComposite();
+  }
+  renderComposite();
+  renderHand();
+};
+
+function clearComposite() {
+  compositeMode = false;
+  compositeTokens = [];
+  compositeJokerAssign = [];
+  compositeWrapper.style.display = 'none';
+  compositeToggleBtn.innerText = '合成数出し';
+  showCompositeOps(false);
+}
+
+function restoreCardsFromComposite() {
+  const ids = new Set(compositeTokens.filter(t => t.kind==='card').map(t => t.card_id));
+  if (!ids.size) return;
+  // 合成数に使っていたカードは「選択」からも外して未選択へ
+  selectedCards = selectedCards.filter(c => !ids.has(c.card_id));
+}
+
+function renderComposite() {
+  const area = document.getElementById('composite-area');
+  const jokersDiv = document.getElementById('composite-joker-selectors');
+  area.innerHTML = '';
+  jokersDiv.innerHTML = '';
+
+  // 合成数トークンの描画（クリックで削除）
+  compositeTokens.forEach((t, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'card-button';
+
+    if (t.kind === 'op') {
+      btn.innerText = t.op;
+      btn.title = 'クリックで削除';
+      btn.onclick = () => { compositeTokens.splice(idx,1); renderComposite(); };
+    } else {
+      const card = myHand.find(c => c.card_id === t.card_id) || t;
+      const symbol = suitSymbols[card.suit] || card.suit;
+      if (card.is_joker) {
+        const jIdx = indexAmongCompositeJokers(idx);
+        const assigned = compositeJokerAssign[jIdx] ?? 'inf';
+        btn.innerText = `★${assigned === 'inf' ? '∞' : assigned}`;
+      } else {
+        btn.innerText = `${symbol}${card.rank}`;
+      }
+      btn.title = 'クリックで合成数場から除去（手札へ戻す）';
+      btn.onclick = () => {
+        compositeTokens.splice(idx,1);
+        renderComposite();
+        renderHand();
+      };
+    }
+    area.appendChild(btn);
+  });
+
+  // Joker 割当 UI（合成数場にある Joker の出現順でセレクト生成）
+  const compositeJokers = compositeTokens
+    .filter(t => t.kind==='card')
+    .map(t => myHand.find(c => c.card_id===t.card_id) || t)
+    .filter(c => c.is_joker);
+
+  compositeJokers.forEach((_, j) => {
+    const sel = document.createElement('select');
+    sel.onchange = () => {
+      compositeJokerAssign[j] = sel.value; // '0'..'13' or 'inf'
+      renderComposite(); // 反映
+    };
+    // 0..13 と ∞（inf）を候補に
+    ['inf', ...Array.from({length:14},(_,k)=>String(k))].forEach(v=>{
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.text  = (v==='inf') ? '∞' : v;
+      if (String(compositeJokerAssign[j] ?? 'inf') === v) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    jokersDiv.appendChild(sel);
+  });
+}
+
+// 「idx 位置の Joker が合成数場 Joker の何番目か」を返す
+function indexAmongCompositeJokers(idxInTokens) {
+  let count = 0;
+  for (let i=0;i<=idxInTokens;i++){
+    const t = compositeTokens[i];
+    if (t.kind==='card'){
+      const card = myHand.find(c=>c.card_id===t.card_id) || t;
+      if (card.is_joker) count++;
+    }
+  }
+  return count-1;
+}
+
+// 演算子の追加
+document.querySelectorAll('#composite-ops [data-op]').forEach(b=>{
+  b.onclick = () => {
+    if (!compositeMode) return;
+    compositeTokens.push({kind:'op', op:b.dataset.op});
+    renderComposite();
+  };
+});
+
+// 1回だけ実行
+document.querySelectorAll('#composite-ops [data-op]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!compositeMode) return;  // 合成数モード外は無視
+    // 先頭や直前が演算子のときは弾く（簡易ガード）
+    if (compositeTokens.length === 0 || compositeTokens[compositeTokens.length-1].kind !== 'card') return;
+
+    compositeTokens.push({ kind: 'op', op: btn.dataset.op });
+    renderComposite();           // 追加→再描画（削除ハンドラ等はrenderComposite内に既にある）
+  });
+});
+
+
 
 function updateJokerSelectors() {
     const jokerCards = selectedCards.filter(c => c.is_joker);
@@ -486,6 +679,10 @@ function updateJokerSelectors() {
 
 
 function playCards() {
+    if (compositeMode) {
+        alert('合成数出し（演算子含む）の送信は未対応です。カードのみで出してください。');
+        return;
+    }
     const jokerCount = selectedCards.filter(c => c.is_joker).length;
     if (jokerAssignedRanks.length !== jokerCount) {
         alert('ジョーカーの数を指定してください');
