@@ -393,7 +393,11 @@ function updateRoomDisplay() {
 function joinRoom(roomId) {
     ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
     currentRoom = roomId;
-    document.getElementById('current-room').innerText = `入室中: ${roomId}`;
+
+    const ruleLabel = roomRules[roomId] || "";
+    document.getElementById('current-room').innerText =
+        ruleLabel ? `入室中: ${roomId} (${ruleLabel})` : `入室中: ${roomId}`;
+
     currentRoomAllowComposite = !!roomCompositeFlags[roomId];
     syncCompositeAvailability();
     // 状態更新はサーバーからの room_state_initialization メッセージで行う
