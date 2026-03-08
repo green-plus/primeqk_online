@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>そすー大富豪オンライン</title>
+    <title>素数大富豪＋</title>
     <style>
         #chat-box {
             border: 1px solid #ccc;
@@ -80,7 +80,7 @@
 
   <!-- 部屋一覧 -->
   <div id="state-room-list">
-      <h2>そすー大富豪オンライン</h2>
+      <h2>素数大富豪＋</h2>
       <div id="rooms"></div>
       <div id="name-prompt">
         <label for="name-input">あなたの名前：</label>
@@ -89,20 +89,17 @@
       </div>
       <div id="your-name-display" style="margin: 8px 0; font-weight: bold;"></div>
       <div id="room-description">
-          <p>そすー大富豪オンラインへようこそ！</p>
-          <p>そすー大富豪オンラインはpermil氏の「
+          <p>素数大富豪＋へようこそ！</p>
+          <p>素数大富豪＋はpermil氏の「
           <span class="link"><a href="https://permil.net/pd/">素数大富豪オンライン</a></span>
           」を参考に開発された、素数大富豪の対戦プラットフォームです。</p>
-          <p>2025年の札幌杯で開催されたシマエナガリーグにならい、5枚の手札と1枚のペナルティという
-            初心者向けのルールが実装されています。</p>
+          <p>様々なルールの素数大富豪で遊べるようになることを願って名付けられました。</p>
           <p>ルール</p>
           <p>・2人対戦のみ（それ以外の人数では開始できません）</p>
-          <p>・配られる手札は5枚</p>
-          <p>・ペナルティは常に1枚</p>
-          <p>・<span class="rainbow-text">グロタンカットあり</span></p>
+          <p>・グロタンカットあり</span></p>
           <p>・ラマヌジャン革命あり</p>
           <p>・ジョーカーあり</p>
-          <p>・合成数出しなし</p>
+          <p>・<span class="rainbow-text">合成数出し新規実装</span></p>
           <p>仕様</p>
           <p>・選択中のカードをもう一度クリックすると戻せます</p>
           <p>・ジョーカーは☆で表示されています</p>
@@ -121,6 +118,7 @@
               <li>v0.8 25/05/22 プレイヤー名を追加</li>
               <li>v1.0 25/05/26 ジョーカーを追加、デザインを調整、完成報告</li>
               <li>v1.1 25/10/02 ルールバリエーションを追加、山札への流しを追加、素数判定を改善</li>
+              <li>v2.0 26/03/08 合成数出しを追加、素数大富豪＋に改名、四つ子素数大富豪を追加</li>
               <!-- <li></li> -->
           </ul>
       </div>
@@ -206,11 +204,13 @@
 
 <script>
 const ws = new WebSocket("wss://web-production-c8e68.up.railway.app/ws");
-//const ws = new WebSocket("ws://localhost:8000/ws");
+// const ws = new WebSocket("ws://localhost:8000/ws");
 
 let currentRoom = null;
 let roomCounts = {};
 let roomRules = {};
+let roomCompositeFlags = {};
+let currentRoomAllowComposite = false;
 let isWaiting = false;
 let playerId = null;
 let playerName = null;
@@ -242,6 +242,7 @@ ws.onmessage = (event) => {
     if (msg.type === "room_counts") {
         roomCounts = msg.counts;
           if (msg.rules) roomRules = msg.rules; // ここで初期化
+          if (msg.allow_composite) roomCompositeFlags = msg.allow_composite;
         updateRoomDisplay();
     }
     else if (msg.type === "your_id") {
@@ -251,6 +252,7 @@ ws.onmessage = (event) => {
         // playerが部屋に入っているか、対戦か観戦かに限って更新
         roomCounts[msg.room_id] = msg.count;
         roomRules[msg.room_id]  = msg.rule;   // 受け取る
+        if (typeof msg.allow_composite === "boolean") roomCompositeFlags[msg.room_id] = msg.allow_composite;
         updateRoomDisplay();
 
         if (currentRoom === msg.room_id) {
@@ -269,6 +271,10 @@ ws.onmessage = (event) => {
     else if (msg.type === "room_state_initialization") {
         // 入室時にのみ実行
         // サーバ側の room_state に合わせてクライアントの state を更新
+        if (typeof msg.allow_composite === "boolean") {
+            currentRoomAllowComposite = msg.allow_composite;
+            syncCompositeAvailability();
+        }
         if (msg.room_state === "waiting") {
             setState("in-room");
         } else if (msg.room_state === "playing") {
@@ -278,6 +284,10 @@ ws.onmessage = (event) => {
     else if (msg.type === "game_start") {
         // ゲーム開始
         // ターンは game_update で更新
+        if (typeof msg.allow_composite === "boolean") {
+            currentRoomAllowComposite = msg.allow_composite;
+            syncCompositeAvailability();
+        }
         setState("playing");
     }
     else if (msg.type === "deal") {
@@ -307,6 +317,10 @@ ws.onmessage = (event) => {
         } else {
             fieldEl.classList.remove('revolution');
         }
+        if (typeof msg.allow_composite === "boolean") {
+            currentRoomAllowComposite = msg.allow_composite;
+            syncCompositeAvailability();
+        }
         const handCounts = msg.hand_counts
             .map(h => `${h.name}: ${h.count}枚`)
             .join("  ");
@@ -327,6 +341,7 @@ ws.onmessage = (event) => {
         // ドローや他の操作で手札が更新された
         myHand = msg.your_hand;
         renderHand();
+        renderComposite();
     }
     else if (msg.type === "next_turn") {
         // ターン表示の更新
@@ -339,6 +354,9 @@ ws.onmessage = (event) => {
 
         // ゲーム終了時の処理
         // ログはlog_chatで送信
+        selectedCards = [];
+        jokerAssignedRanks = [];
+        clearComposite();
         setState("in-room");
     }
     else if (msg.type === "chat") {
@@ -356,8 +374,11 @@ ws.onmessage = (event) => {
 function updateRoomDisplay() {
     const roomsDiv = document.getElementById('rooms');
     roomsDiv.innerHTML = '';
-    for (let i = 1; i <= 5; i++) {
-        const roomId = `room_${i}`;
+    Object.keys(roomRules).sort((a, b) => {
+        const na = Number(a.replace('room_', ''));
+        const nb = Number(b.replace('room_', ''));
+        return na - nb;
+    }).forEach(roomId => {
         const roomEl = document.createElement('div');
         const count = roomCounts[roomId] || 0;
         roomEl.innerText = `${roomId} (${roomRules[roomId]}) - 人数:${count}`;
@@ -366,13 +387,15 @@ function updateRoomDisplay() {
         joinBtn.onclick = () => joinRoom(roomId);
         roomEl.appendChild(joinBtn);
         roomsDiv.appendChild(roomEl);
-    }
+    });
 }
 
 function joinRoom(roomId) {
     ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
     currentRoom = roomId;
     document.getElementById('current-room').innerText = `入室中: ${roomId}`;
+    currentRoomAllowComposite = !!roomCompositeFlags[roomId];
+    syncCompositeAvailability();
     // 状態更新はサーバーからの room_state_initialization メッセージで行う
 }
 
@@ -382,6 +405,8 @@ function leaveRoom() {
     isWaiting = false;
     document.getElementById('player-status').innerText = '観戦中';
     document.getElementById('status-btn').innerText = '参加する';
+    currentRoomAllowComposite = false;
+    clearComposite();
     setState("room-list");
 }
 
@@ -495,6 +520,25 @@ function toggleSelect(card) {
   renderHand();
 }
 
+let allowCompositeInRoom = false;
+
+function syncCompositeAvailability() {
+
+  const compositeToggleBtn = document.getElementById('composite-toggle-btn');
+  const compositeWrapper   = document.getElementById('composite-wrapper');
+
+  if (!compositeToggleBtn || !compositeWrapper) return;
+
+  if (currentRoomAllowComposite) {
+    compositeToggleBtn.style.display = 'inline-block';
+  } else {
+    // 合成数OFFの部屋ではモード解除してUIも隠す
+    clearComposite();
+    compositeToggleBtn.style.display = 'none';
+    compositeWrapper.style.display = 'none';
+  }
+}
+
 const compositeOps = document.getElementById('composite-ops');
 
 // 2) 表示・非表示トグル
@@ -508,6 +552,7 @@ const compositeWrapper = document.getElementById('composite-wrapper');
 const compositeToggleBtn = document.getElementById('composite-toggle-btn');
 
 compositeToggleBtn.onclick = () => {
+  if (!currentRoomAllowComposite) return;
   if (!compositeMode) {
     compositeMode = true;
     compositeWrapper.style.display = '';
@@ -521,6 +566,8 @@ compositeToggleBtn.onclick = () => {
   renderComposite();
   renderHand();
 };
+
+
 
 function clearComposite() {
   compositeMode = false;
@@ -611,15 +658,6 @@ function indexAmongCompositeJokers(idxInTokens) {
 }
 
 // 演算子の追加
-document.querySelectorAll('#composite-ops [data-op]').forEach(b=>{
-  b.onclick = () => {
-    if (!compositeMode) return;
-    compositeTokens.push({kind:'op', op:b.dataset.op});
-    renderComposite();
-  };
-});
-
-// 1回だけ実行
 document.querySelectorAll('#composite-ops [data-op]').forEach(btn => {
   btn.addEventListener('click', () => {
     if (!compositeMode) return;  // 合成数モード外は無視
@@ -679,9 +717,75 @@ function updateJokerSelectors() {
 
 
 function playCards() {
+    // 自分の手札を card_id で引けるように（Joker判定に使用）
+    const handById = Object.fromEntries((myHand || []).map(c => [c.card_id, c]));
+
     if (compositeMode) {
-        alert('合成数出し（演算子含む）の送信は未対応です。カードのみで出してください。');
+      if (!currentRoomAllowComposite) {
+        alert('この部屋では合成数出しは使えません');
         return;
+      }
+      if (selectedCards.length === 0) {
+        alert('見せ札を選んでください');
+        return;
+      }
+      if (compositeTokens.length === 0) {
+        alert('材料札で合成数の式を作ってください');
+        return;
+      }
+
+      const selJokerCount = selectedCards.filter(c => c.is_joker).length;
+      if (jokerAssignedRanks.length !== selJokerCount) {
+        alert('（合成数）選択側のジョーカーの数をすべて指定してください');
+        return;
+      }
+      if (jokerAssignedRanks.some(v => String(v) === 'inf')) {
+        alert('合成数モードでは∞は使えません');
+        return;
+      }
+
+      const compJokerCount = compositeTokens
+        .filter(t => t.kind === 'card')
+        .map(t => handById[t.card_id])
+        .filter(c => c && c.is_joker).length;
+
+      if (compositeJokerAssign.length !== compJokerCount) {
+        alert('（合成数）式内のジョーカーの数をすべて指定してください');
+        return;
+      }
+      if (compositeJokerAssign.some(v => String(v) === 'inf')) {
+        alert('合成数モードでは∞は使えません');
+        return;
+      }
+
+      const consumeCardsAuto = compositeTokens
+        .filter(t => t.kind === 'card')
+        .map(t => handById[t.card_id])
+        .filter(Boolean);
+
+      const payload = {
+        type: "play_card",
+        mode: "composite",
+        selected: {
+          cards: selectedCards,
+          assigned_numbers: jokerAssignedRanks
+        },
+        consume: {
+          cards: consumeCardsAuto
+        },
+        composite: {
+          tokens: compositeTokens,
+          assigned_numbers: compositeJokerAssign
+        }
+      };
+      ws.send(JSON.stringify(payload));
+
+      selectedCards = [];
+      jokerAssignedRanks = [];
+      clearComposite();
+      updateJokerSelectors();
+      renderHand();
+      return;
     }
     const jokerCount = selectedCards.filter(c => c.is_joker).length;
     if (jokerAssignedRanks.length !== jokerCount) {
