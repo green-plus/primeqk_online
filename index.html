@@ -103,6 +103,7 @@
           <p>仕様</p>
           <p>・選択中のカードをもう一度クリックすると戻せます</p>
           <p>・ジョーカーは☆で表示されています</p>
+          <p>・半素数大富豪で25桁以上の数は失敗判定になります（計算時間制限のため）</p>
           <p>既知の問題</p>
           <p>・対戦中に退出したときの処理が不安定です（改善しています）</p>
           <p>・前の試合の選択中カードが適切にリセットされません（一度出そうとすると直ります）</p>
@@ -140,7 +141,8 @@
 <div id="state-game" style="display:none;">
     <!-- ターン表示エリア -->
     <div id="turn-display" style="margin-bottom:10px;">
-        現在のターン: <span id="current-turn">(未設定)</span>
+        現在のターン: <span id="current-turn">(未設定)</span><br>
+        経過時間: <span id="turn-elapsed">0</span>秒
     </div>
 
     <!-- ゲーム状況表示 -->
@@ -214,6 +216,9 @@ let currentRoomAllowComposite = false;
 let isWaiting = false;
 let playerId = null;
 let playerName = null;
+let turnStartAt = null;
+let turnTimerId = null;
+let lastTurnName = null;
 
 // ゲーム状態
 // field-numberは直接DOMに
@@ -302,6 +307,9 @@ ws.onmessage = (event) => {
         // action_result, penalty, passの統合
         // 現在のターン、デッキ枚数、場のカードの更新
         document.getElementById('current-turn').innerText = msg.current_turn;
+        if (msg.current_turn !== lastTurnName) {
+            startTurnTimer(msg.current_turn);
+        }
         document.getElementById('deck-count').innerText = msg.deck_count;
         // スートは抜いて数を半角スペース区切りで繋げる
         const fieldEl = document.getElementById('field-number');
@@ -346,12 +354,13 @@ ws.onmessage = (event) => {
     else if (msg.type === "next_turn") {
         // ターン表示の更新
         document.getElementById('current-turn').innerText = msg.current_turn;
+        startTurnTimer(msg.current_turn);
         console.log("Next turn = ", msg.current_turn);
     }
     else if (msg.type === "game_over") {
         // 場をリセットしておく
         document.getElementById('field-number').innerText = "(未設定)";
-
+        stopTurnTimer();
         // ゲーム終了時の処理
         // ログはlog_chatで送信
         selectedCards = [];
@@ -370,6 +379,51 @@ ws.onmessage = (event) => {
         alert(msg.message);
     }
 };
+
+function startTurnTimer(turnName) {
+    if (!turnName) {
+        stopTurnTimer();
+        return;
+    }
+
+    turnStartAt = Date.now();
+    lastTurnName = turnName;
+
+    if (turnTimerId !== null) {
+        clearInterval(turnTimerId);
+    }
+
+    updateTurnElapsedLabel();
+
+    turnTimerId = setInterval(() => {
+        updateTurnElapsedLabel();
+    }, 1000);
+}
+
+function stopTurnTimer() {
+    if (turnTimerId !== null) {
+        clearInterval(turnTimerId);
+        turnTimerId = null;
+    }
+    turnStartAt = null;
+    lastTurnName = null;
+
+    const elapsedEl = document.getElementById('turn-elapsed');
+    if (elapsedEl) elapsedEl.innerText = '0';
+}
+
+function updateTurnElapsedLabel() {
+    const elapsedEl = document.getElementById('turn-elapsed');
+    if (!elapsedEl) return;
+
+    if (turnStartAt === null) {
+        elapsedEl.innerText = '0';
+        return;
+    }
+
+    const elapsedSec = Math.floor((Date.now() - turnStartAt) / 1000);
+    elapsedEl.innerText = String(elapsedSec);
+}
 
 function updateRoomDisplay() {
     const roomsDiv = document.getElementById('rooms');
@@ -411,6 +465,7 @@ function leaveRoom() {
     document.getElementById('status-btn').innerText = '参加する';
     currentRoomAllowComposite = false;
     clearComposite();
+    stopTurnTimer();
     setState("room-list");
 }
 
@@ -862,6 +917,7 @@ ws.onopen = () => {
 
 function setState(state) {
     if (state === "room-list") {
+        stopTurnTimer();
         document.getElementById('state-room-list').style.display = 'block';
         document.getElementById('state-common').style.display = 'none';
         document.getElementById('state-game').style.display = 'none';
