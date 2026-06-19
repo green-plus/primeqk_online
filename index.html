@@ -21,6 +21,31 @@
             color: #8a1f1f;
             font-weight: bold;
         }
+        .score-record {
+            margin-top: 4px;
+            background: #eeeeff;
+            color: #000;
+            font-family: sans-serif;
+            font-size: 22px;
+            line-height: 1.05;
+        }
+        .score-record summary {
+            display: block;
+            cursor: pointer;
+            background: #f4f1d5;
+            color: #0088ff;
+            font-weight: normal;
+            list-style: none;
+        }
+        .score-record summary::-webkit-details-marker {
+            display: none;
+        }
+        .score-record-lines {
+            padding: 1px 0 4px;
+        }
+        .score-record-line {
+            white-space: pre;
+        }
         /* 手札エリアのボタンを見やすくする */
         .card-button {
             margin: 2px;
@@ -416,18 +441,24 @@ function renderScoreRecord(msg) {
     if (!chatBox) return;
 
     const details = document.createElement('details');
+    details.className = 'score-record';
+    details.open = true;
     const summary = document.createElement('summary');
-    const winnerText = msg.winner ? ` / 勝者: ${msg.winner}` : "";
-    summary.textContent = `system: 数譜${winnerText}`;
+    summary.textContent = '数譜';
     details.appendChild(summary);
 
-    const list = document.createElement('ol');
-    (msg.records || []).forEach(record => {
-        const item = document.createElement('li');
-        item.textContent = `${record.player}: ${record.notation} (${record.result})`;
-        list.appendChild(item);
+    const lines = msg.lines || (msg.records || []).map(record =>
+        record.line || `${record.player}: ${record.notation} (${record.result})`
+    );
+    const body = document.createElement('div');
+    body.className = 'score-record-lines';
+    lines.forEach(lineText => {
+        const line = document.createElement('div');
+        line.className = 'score-record-line';
+        line.textContent = lineText;
+        body.appendChild(line);
     });
-    details.appendChild(list);
+    details.appendChild(body);
 
     chatBox.appendChild(details);
     chatBox.scrollTop = chatBox.scrollHeight;
