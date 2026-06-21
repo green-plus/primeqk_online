@@ -75,6 +75,15 @@
             color: #078232;
             font-weight: bold;
         }
+        #prime-assist-panel {
+            display: none;
+            margin: 6px 0 10px;
+        }
+        #prime-assist-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
         /* 出す予定のカードが空でも1段ぶんのスペースを確保（ガタつき防止） */
         #selected-row:empty::before{
           content: "";
@@ -227,6 +236,10 @@
           <div class="section-title">出す予定のカード：</div>
           <div id="selected-row" class="card-row"></div>
           <div id="registered-play-status"></div>
+          <div id="prime-assist-panel">
+            <div class="section-title">素数候補：</div>
+            <div id="prime-assist-list"></div>
+          </div>
         </section>
 
         <!-- 合成数場（合成数出しモード時に表示） -->
@@ -277,8 +290,10 @@ let roomCounts = {};
 let roomRules = {};
 let roomCompositeFlags = {};
 let roomPrimeRules = {};
+let roomAssistFlags = {};
 let currentRoomAllowComposite = false;
 let currentRoomPrimeRule = null;
+let currentRoomAssistEnabled = false;
 let isWaiting = false;
 let playerId = null;
 let playerName = null;
@@ -289,6 +304,7 @@ let appState = "room-list";
 let registeredPrimeCount = 0;
 let registeredPrimeValues = new Set();
 let registeredCompositeValues = new Set();
+let primeAssistTimerId = null;
 
 // ゲーム状態
 // field-numberは直接DOMに
@@ -320,6 +336,7 @@ ws.onmessage = (event) => {
           if (msg.rules) roomRules = msg.rules; // ここで初期化
           if (msg.allow_composite) roomCompositeFlags = msg.allow_composite;
           if (msg.prime_rules) roomPrimeRules = msg.prime_rules;
+          if (msg.assist_enabled) roomAssistFlags = msg.assist_enabled;
         updateRoomDisplay();
     }
     else if (msg.type === "your_id") {
@@ -331,9 +348,14 @@ ws.onmessage = (event) => {
         roomRules[msg.room_id]  = msg.rule;   // 受け取る
         if (typeof msg.allow_composite === "boolean") roomCompositeFlags[msg.room_id] = msg.allow_composite;
         if (msg.prime_rule) roomPrimeRules[msg.room_id] = msg.prime_rule;
+        if (typeof msg.assist_enabled === "boolean") roomAssistFlags[msg.room_id] = msg.assist_enabled;
         updateRoomDisplay();
 
         if (currentRoom === msg.room_id) {
+            if (typeof msg.assist_enabled === "boolean") {
+                currentRoomAssistEnabled = msg.assist_enabled;
+                schedulePrimeAssist();
+            }
             if (msg.prime_rule) {
                 currentRoomPrimeRule = msg.prime_rule;
                 syncRegisteredPrimePanel();
@@ -363,6 +385,10 @@ ws.onmessage = (event) => {
         if (msg.prime_rule) {
             currentRoomPrimeRule = msg.prime_rule;
         }
+        if (typeof msg.assist_enabled === "boolean") {
+            currentRoomAssistEnabled = msg.assist_enabled;
+            schedulePrimeAssist();
+        }
         if (msg.room_state === "waiting") {
             setState("in-room");
         } else if (msg.room_state === "playing") {
@@ -378,6 +404,9 @@ ws.onmessage = (event) => {
         }
         if (msg.prime_rule) {
             currentRoomPrimeRule = msg.prime_rule;
+        }
+        if (typeof msg.assist_enabled === "boolean") {
+            currentRoomAssistEnabled = msg.assist_enabled;
         }
         setState("playing");
     }
@@ -419,10 +448,14 @@ ws.onmessage = (event) => {
             currentRoomPrimeRule = msg.prime_rule;
             syncRegisteredPrimePanel();
         }
+        if (typeof msg.assist_enabled === "boolean") {
+            currentRoomAssistEnabled = msg.assist_enabled;
+        }
         const handCounts = msg.hand_counts
             .map(h => `${h.name}: ${h.count}枚`)
             .join("  ");
         document.getElementById('hand-counts').innerText = handCounts;
+        schedulePrimeAssist();
     }
     else if (msg.type === "action_result") {
         if (msg.action === "play_card") {
@@ -446,6 +479,7 @@ ws.onmessage = (event) => {
         document.getElementById('current-turn').innerText = msg.current_turn;
         startTurnTimer(msg.current_turn);
         console.log("Next turn = ", msg.current_turn);
+        schedulePrimeAssist();
     }
     else if (msg.type === "game_over") {
         // 場をリセットしておく
@@ -462,6 +496,9 @@ ws.onmessage = (event) => {
     else if (msg.type === "registered_numbers_updated" || msg.type === "registered_primes_updated") {
         registeredPrimeCount = msg.count || 0;
         renderRegisteredPrimeStatus(msg);
+    }
+    else if (msg.type === "prime_assist_result") {
+        renderPrimeAssist(msg);
     }
     else if (msg.type === "chat") {
         const chatBox = document.getElementById('chat-box');
@@ -605,6 +642,7 @@ function joinRoom(roomId) {
 
     currentRoomAllowComposite = !!roomCompositeFlags[roomId];
     currentRoomPrimeRule = roomPrimeRules[roomId] || null;
+    currentRoomAssistEnabled = !!roomAssistFlags[roomId];
     syncCompositeAvailability();
     syncRegisteredPrimePanel();
     // 状態更新はサーバーからの room_state_initialization メッセージで行う
@@ -618,6 +656,7 @@ function leaveRoom() {
     document.getElementById('status-btn').innerText = '参加する';
     currentRoomAllowComposite = false;
     currentRoomPrimeRule = null;
+    currentRoomAssistEnabled = false;
     clearLocalHandState();
     stopTurnTimer();
     setState("room-list");
@@ -652,6 +691,7 @@ function saveRegisteredPrimes() {
     localStorage.setItem("primeqk_registered_composite_text", compositeInput.value);
     rebuildRegisteredValueSets();
     updateRegisteredPlayStatus();
+    schedulePrimeAssist();
     if (status) status.innerText = "登録中...";
     ws.send(JSON.stringify({
         type: "set_registered_numbers",
@@ -778,6 +818,73 @@ function updateRegisteredPlayStatus() {
     }
 }
 
+function schedulePrimeAssist() {
+    if (primeAssistTimerId !== null) {
+        clearTimeout(primeAssistTimerId);
+    }
+    primeAssistTimerId = setTimeout(requestPrimeAssist, 220);
+}
+
+function requestPrimeAssist() {
+    primeAssistTimerId = null;
+    const panel = document.getElementById('prime-assist-panel');
+    if (currentRoomPrimeRule !== "registered" || !currentRoomAssistEnabled || appState !== "playing" || !myHand.length) {
+        if (panel) panel.style.display = 'none';
+        return;
+    }
+    ws.send(JSON.stringify({
+        type: "get_prime_assist",
+        selected_card_ids: selectedCards.map(card => card.card_id),
+        limit: 100
+    }));
+}
+
+function renderPrimeAssist(msg) {
+    const panel = document.getElementById('prime-assist-panel');
+    const list = document.getElementById('prime-assist-list');
+    if (!panel || !list) return;
+    list.innerHTML = '';
+
+    const candidates = msg.candidates || [];
+    if (currentRoomPrimeRule !== "registered" || !currentRoomAssistEnabled || appState !== "playing" || candidates.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.style.display = 'block';
+    candidates.forEach(candidate => {
+        const btn = document.createElement('button');
+        btn.className = 'card-button';
+        const kindLabel = candidate.kind === "composite" ? "合" : "素";
+        btn.innerText = `${kindLabel} ${candidate.number}`;
+        btn.onclick = () => applyPrimeAssistCandidate(candidate);
+        list.appendChild(btn);
+    });
+}
+
+function applyPrimeAssistCandidate(candidate) {
+    if (compositeMode) {
+        restoreCardsFromComposite();
+        clearComposite();
+    }
+    const handById = new Map(myHand.map(card => [card.card_id, card]));
+    selectedCards = (candidate.cards || [])
+        .map(card => handById.get(card.card_id))
+        .filter(Boolean);
+    jokerAssignedRanks = (candidate.assigned_numbers || []).map(String);
+    if (candidate.kind === "composite" && currentRoomAllowComposite) {
+        compositeMode = true;
+        compositeWrapper.style.display = '';
+        compositeToggleBtn.innerText = 'キャンセル';
+        showCompositeOps(true);
+    }
+    updateJokerSelectors();
+    renderHand();
+    renderComposite();
+    updateRegisteredPlayStatus();
+    schedulePrimeAssist();
+}
+
 function toggleStatus() {
     isWaiting = !isWaiting;
     const statusText = isWaiting ? "対戦待ち" : "観戦中";
@@ -840,6 +947,7 @@ function renderHand() {
     myHandDiv.appendChild(btn);
   });
   updateRegisteredPlayStatus();
+  schedulePrimeAssist();
 }
 
 function onHandCardClick(card, ev) {
@@ -1055,6 +1163,7 @@ function updateJokerSelectors() {
     const jokerCards = selectedCards.filter(c => c.is_joker);
     const container = document.getElementById('joker-selectors-container');
     container.innerHTML = '';
+    const previousAssignedRanks = jokerAssignedRanks.slice();
     jokerAssignedRanks = [];
 
     if (jokerCards.length === 0) {
@@ -1083,6 +1192,7 @@ function updateJokerSelectors() {
             <option value="12">12</option>
             <option value="13">13</option>
         `;
+        selector.value = previousAssignedRanks[index] ?? "inf";
         selector.onchange = function() {
             jokerAssignedRanks[index] = this.value;
             renderHand();
@@ -1091,8 +1201,7 @@ function updateJokerSelectors() {
         container.appendChild(document.createTextNode(`ジョーカー${index+1}枚目: `));
         container.appendChild(selector);
         container.appendChild(document.createElement('br'));
-        // デフォルトは∞でセット
-        jokerAssignedRanks[index] = "inf";
+        jokerAssignedRanks[index] = previousAssignedRanks[index] ?? "inf";
     });
 }
 
