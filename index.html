@@ -172,18 +172,23 @@
     </div>
     <div>参加者一覧: <span id="player-list"></span></div>
     <section id="registered-prime-panel" style="display:none; margin-top:10px;">
-        <h3>使用する素数の登録</h3>
+        <h3>使用する数の登録</h3>
         <textarea
             id="registered-prime-input"
             rows="8"
             cols="48"
             placeholder="例: 2 3 5 7&#10;137&#10;KKJ"
         ></textarea>
+        <textarea
+            id="registered-composite-input"
+            rows="6"
+            cols="48"
+            placeholder="例: 4=2*2&#10;10=2*5&#10;q1=j*j"
+        ></textarea>
         <div>
             <button id="registered-prime-save-btn">登録</button>
             <button id="registered-prime-clear-btn">クリア</button>
             <button id="registered-prime-sample-btn">サンプルを登録</button>
-            <input id="registered-prime-file" type="file" accept=".txt,.csv,text/plain,text/csv">
         </div>
         <div id="registered-prime-status">未登録</div>
     </section>
@@ -328,7 +333,7 @@ ws.onmessage = (event) => {
                 let text = p.name.toString();
                 if (p.id === playerId) text += "(自分)";
                 if (currentRoomPrimeRule === "registered") {
-                    text += `[登録${p.registered_prime_count || 0}]`;
+                    text += `[素${p.registered_prime_count || 0}/合${p.registered_composite_count || 0}]`;
                 }
                 if (p.status === "waiting") text = "*" + text;
                 return text;
@@ -445,7 +450,7 @@ ws.onmessage = (event) => {
     else if (msg.type === "score_record") {
         renderScoreRecord(msg);
     }
-    else if (msg.type === "registered_primes_updated") {
+    else if (msg.type === "registered_numbers_updated" || msg.type === "registered_primes_updated") {
         registeredPrimeCount = msg.count || 0;
         renderRegisteredPrimeStatus(msg);
     }
@@ -611,31 +616,36 @@ function leaveRoom() {
 
 function syncRegisteredPrimePanel() {
     const panel = document.getElementById('registered-prime-panel');
-    const input = document.getElementById('registered-prime-input');
+    const primeInput = document.getElementById('registered-prime-input');
+    const compositeInput = document.getElementById('registered-composite-input');
     const saveBtn = document.getElementById('registered-prime-save-btn');
     const clearBtn = document.getElementById('registered-prime-clear-btn');
-    const fileInput = document.getElementById('registered-prime-file');
-    if (!panel || !input || !saveBtn || !clearBtn || !fileInput) return;
+    const sampleBtn = document.getElementById('registered-prime-sample-btn');
+    if (!panel || !primeInput || !compositeInput || !saveBtn || !clearBtn || !sampleBtn) return;
 
     const show = currentRoomPrimeRule === "registered";
     panel.style.display = show ? 'block' : 'none';
     const disabled = appState === "playing";
-    input.disabled = disabled;
+    primeInput.disabled = disabled;
+    compositeInput.disabled = disabled;
     saveBtn.disabled = disabled;
     clearBtn.disabled = disabled;
-    fileInput.disabled = disabled;
+    sampleBtn.disabled = disabled;
 }
 
 function saveRegisteredPrimes() {
-    const input = document.getElementById('registered-prime-input');
+    const primeInput = document.getElementById('registered-prime-input');
+    const compositeInput = document.getElementById('registered-composite-input');
     const status = document.getElementById('registered-prime-status');
-    if (!input) return;
+    if (!primeInput || !compositeInput) return;
 
-    localStorage.setItem("primeqk_registered_prime_text", input.value);
+    localStorage.setItem("primeqk_registered_prime_text", primeInput.value);
+    localStorage.setItem("primeqk_registered_composite_text", compositeInput.value);
     if (status) status.innerText = "登録中...";
     ws.send(JSON.stringify({
-        type: "set_registered_primes",
-        text: input.value
+        type: "set_registered_numbers",
+        prime_text: primeInput.value,
+        composite_text: compositeInput.value
     }));
 }
 
@@ -647,23 +657,42 @@ function loadRegisteredPrimeSample() {
 
 function renderRegisteredPrimeStatus(msg) {
     const status = document.getElementById('registered-prime-status');
+    const primeInput = document.getElementById('registered-prime-input');
+    const compositeInput = document.getElementById('registered-composite-input');
+    if (msg.sample_prime_text && primeInput) {
+        primeInput.value = msg.sample_prime_text;
+        localStorage.setItem("primeqk_registered_prime_text", primeInput.value);
+    }
+    if (msg.sample_composite_text && compositeInput) {
+        compositeInput.value = msg.sample_composite_text;
+        localStorage.setItem("primeqk_registered_composite_text", compositeInput.value);
+    }
     if (!status) return;
 
-    const errors = msg.errors || [];
-    const parts = [`登録済み: ${msg.count || 0}件`];
-    if (msg.duplicate_count) parts.push(`重複: ${msg.duplicate_count}件`);
-    if (errors.length) {
-        const sample = errors.slice(0, 5).map(e => `${e.source_line}行目 ${e.token || ""}: ${e.message}`).join(" / ");
-        parts.push(`エラー: ${errors.length}件 (${sample})`);
+    const primeErrors = msg.prime_errors || msg.errors || [];
+    const compositeErrors = msg.composite_errors || [];
+    const primeCount = msg.prime_count ?? msg.count ?? 0;
+    const compositeCount = msg.composite_count ?? 0;
+    const parts = [`素数: ${primeCount}件`, `合成数: ${compositeCount}件`];
+    const duplicateCount = (msg.prime_duplicate_count || msg.duplicate_count || 0) + (msg.composite_duplicate_count || 0);
+    if (duplicateCount) parts.push(`重複: ${duplicateCount}件`);
+    const allErrors = [
+        ...primeErrors.map(e => ({...e, kind: "素数"})),
+        ...compositeErrors.map(e => ({...e, kind: "合成数"})),
+    ];
+    if (allErrors.length) {
+        const sample = allErrors.slice(0, 5).map(e => `${e.kind}${e.source_line}行目 ${e.token || ""}: ${e.message}`).join(" / ");
+        parts.push(`エラー: ${allErrors.length}件 (${sample})`);
     }
     if (msg.truncated) parts.push("上限で打ち切り");
     status.innerText = parts.join("、");
 }
 
 function loadRegisteredPrimeDraft() {
-    const input = document.getElementById('registered-prime-input');
-    if (!input) return;
-    input.value = localStorage.getItem("primeqk_registered_prime_text") || "";
+    const primeInput = document.getElementById('registered-prime-input');
+    const compositeInput = document.getElementById('registered-composite-input');
+    if (primeInput) primeInput.value = localStorage.getItem("primeqk_registered_prime_text") || "";
+    if (compositeInput) compositeInput.value = localStorage.getItem("primeqk_registered_composite_text") || "";
 }
 
 function toggleStatus() {
@@ -1112,18 +1141,14 @@ document.getElementById('pass-btn').onclick = passTurn;
 document.getElementById('registered-prime-save-btn').onclick = saveRegisteredPrimes;
 document.getElementById('registered-prime-sample-btn').onclick = loadRegisteredPrimeSample;
 document.getElementById('registered-prime-clear-btn').onclick = () => {
-    const input = document.getElementById('registered-prime-input');
-    if (input) input.value = "";
+    const primeInput = document.getElementById('registered-prime-input');
+    const compositeInput = document.getElementById('registered-composite-input');
+    if (primeInput) primeInput.value = "";
+    if (compositeInput) compositeInput.value = "";
     localStorage.removeItem("primeqk_registered_prime_text");
+    localStorage.removeItem("primeqk_registered_composite_text");
     saveRegisteredPrimes();
 };
-document.getElementById('registered-prime-file').addEventListener('change', async (event) => {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-    const input = document.getElementById('registered-prime-input');
-    input.value = await file.text();
-    localStorage.setItem("primeqk_registered_prime_text", input.value);
-});
 loadRegisteredPrimeDraft();
 
 ws.onopen = () => {
