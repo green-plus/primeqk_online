@@ -171,8 +171,7 @@
           <p>・ジョーカーは☆で表示されています</p>
           <p>・半素数大富豪で25桁以上の数は失敗判定になります（計算時間制限のため）</p>
           <p>既知の問題</p>
-          <p>・対戦中に退出したときの処理が不安定です（改善しています）</p>
-          <p>・前の試合の選択中カードが適切にリセットされません（一度出そうとすると直ります）</p>
+          <p>・なし</p>
           <p>バージョン</p>
           <ul>
               <li>v0.1 25/03/31 虚無オンライン公開</li>
@@ -186,6 +185,9 @@
               <li>v1.0 25/05/26 ジョーカーを追加、デザインを調整、完成報告</li>
               <li>v1.1 25/10/02 ルールバリエーションを追加、山札への流しを追加、素数判定を改善</li>
               <li>v2.0 26/03/08 合成数出しを追加、素数大富豪＋に改名、四つ子素数大富豪を追加</li>
+              <li>v2.1 26/04/11 ターン中の経過時間表示を追加</li>
+              <li>v2.2 26/06/19 数譜機能を追加</li>
+              <li>v2.4 26/06/21 素数リスト制限ルール、アシスト機能を追加</li>
               <!-- <li></li> -->
           </ul>
       </div>
@@ -308,9 +310,11 @@ let roomRules = {};
 let roomCompositeFlags = {};
 let roomPrimeRules = {};
 let roomAssistFlags = {};
+let roomRegistrationFlags = {};
 let currentRoomAllowComposite = false;
 let currentRoomPrimeRule = null;
 let currentRoomAssistEnabled = false;
+let currentRoomRegistrationEnabled = false;
 let isWaiting = false;
 let playerId = null;
 let playerName = null;
@@ -382,6 +386,7 @@ ws.onmessage = (event) => {
           if (msg.allow_composite) roomCompositeFlags = msg.allow_composite;
           if (msg.prime_rules) roomPrimeRules = msg.prime_rules;
           if (msg.assist_enabled) roomAssistFlags = msg.assist_enabled;
+          if (msg.registration_enabled) roomRegistrationFlags = msg.registration_enabled;
         updateRoomDisplay();
     }
     else if (msg.type === "your_id") {
@@ -394,9 +399,15 @@ ws.onmessage = (event) => {
         if (typeof msg.allow_composite === "boolean") roomCompositeFlags[msg.room_id] = msg.allow_composite;
         if (msg.prime_rule) roomPrimeRules[msg.room_id] = msg.prime_rule;
         if (typeof msg.assist_enabled === "boolean") roomAssistFlags[msg.room_id] = msg.assist_enabled;
+        if (typeof msg.registration_enabled === "boolean") roomRegistrationFlags[msg.room_id] = msg.registration_enabled;
         updateRoomDisplay();
 
         if (currentRoom === msg.room_id) {
+            if (typeof msg.registration_enabled === "boolean") {
+                currentRoomRegistrationEnabled = msg.registration_enabled;
+                syncRegisteredPrimePanel();
+                schedulePrimeAssist();
+            }
             if (typeof msg.assist_enabled === "boolean") {
                 currentRoomAssistEnabled = msg.assist_enabled;
                 schedulePrimeAssist();
@@ -408,7 +419,7 @@ ws.onmessage = (event) => {
             const playerList = msg.player_list.map(p => {
                 let text = p.name.toString();
                 if (p.id === playerId) text += "(自分)";
-                if (currentRoomPrimeRule === "registered") {
+                if (currentRoomRegistrationEnabled) {
                     text += `[素${p.registered_prime_count || 0}/合${p.registered_composite_count || 0}]`;
                 }
                 if (p.status === "waiting") text = "*" + text;
@@ -430,6 +441,10 @@ ws.onmessage = (event) => {
         if (msg.prime_rule) {
             currentRoomPrimeRule = msg.prime_rule;
         }
+        if (typeof msg.registration_enabled === "boolean") {
+            currentRoomRegistrationEnabled = msg.registration_enabled;
+            syncRegisteredPrimePanel();
+        }
         if (typeof msg.assist_enabled === "boolean") {
             currentRoomAssistEnabled = msg.assist_enabled;
             schedulePrimeAssist();
@@ -449,6 +464,10 @@ ws.onmessage = (event) => {
         }
         if (msg.prime_rule) {
             currentRoomPrimeRule = msg.prime_rule;
+        }
+        if (typeof msg.registration_enabled === "boolean") {
+            currentRoomRegistrationEnabled = msg.registration_enabled;
+            syncRegisteredPrimePanel();
         }
         if (typeof msg.assist_enabled === "boolean") {
             currentRoomAssistEnabled = msg.assist_enabled;
@@ -491,6 +510,10 @@ ws.onmessage = (event) => {
         }
         if (msg.prime_rule) {
             currentRoomPrimeRule = msg.prime_rule;
+            syncRegisteredPrimePanel();
+        }
+        if (typeof msg.registration_enabled === "boolean") {
+            currentRoomRegistrationEnabled = msg.registration_enabled;
             syncRegisteredPrimePanel();
         }
         if (typeof msg.assist_enabled === "boolean") {
@@ -688,6 +711,7 @@ function joinRoom(roomId) {
     currentRoomAllowComposite = !!roomCompositeFlags[roomId];
     currentRoomPrimeRule = roomPrimeRules[roomId] || null;
     currentRoomAssistEnabled = !!roomAssistFlags[roomId];
+    currentRoomRegistrationEnabled = !!roomRegistrationFlags[roomId] || currentRoomPrimeRule === "registered";
     syncCompositeAvailability();
     syncRegisteredPrimePanel();
     // 状態更新はサーバーからの room_state_initialization メッセージで行う
@@ -702,6 +726,7 @@ function leaveRoom() {
     currentRoomAllowComposite = false;
     currentRoomPrimeRule = null;
     currentRoomAssistEnabled = false;
+    currentRoomRegistrationEnabled = false;
     clearLocalHandState();
     stopTurnTimer();
     setState("room-list");
@@ -716,7 +741,7 @@ function syncRegisteredPrimePanel() {
     const sampleBtn = document.getElementById('registered-prime-sample-btn');
     if (!panel || !primeInput || !compositeInput || !saveBtn || !clearBtn || !sampleBtn) return;
 
-    const show = currentRoomPrimeRule === "registered";
+    const show = currentRoomRegistrationEnabled;
     panel.style.display = show ? 'block' : 'none';
     const disabled = appState === "playing";
     primeInput.disabled = disabled;
@@ -847,7 +872,7 @@ function updateRegisteredPlayStatus() {
     if (!el) return;
     el.style.display = 'none';
     el.innerText = "";
-    if (currentRoomPrimeRule !== "registered") return;
+    if (!currentRoomRegistrationEnabled) return;
 
     const number = selectedCardsNumber();
     if (number === null) return;
@@ -907,7 +932,7 @@ function schedulePrimeAssist() {
 function requestPrimeAssist() {
     primeAssistTimerId = null;
     const panel = document.getElementById('prime-assist-panel');
-    if (currentRoomPrimeRule !== "registered" || !currentRoomAssistEnabled || appState !== "playing" || !myHand.length) {
+    if (!currentRoomRegistrationEnabled || !currentRoomAssistEnabled || appState !== "playing" || !myHand.length) {
         if (panel) panel.style.display = 'none';
         return;
     }
@@ -927,7 +952,7 @@ function renderPrimeAssist(msg) {
     list.innerHTML = '';
 
     const candidates = msg.candidates || [];
-    if (currentRoomPrimeRule !== "registered" || !currentRoomAssistEnabled || appState !== "playing" || candidates.length === 0) {
+    if (!currentRoomRegistrationEnabled || !currentRoomAssistEnabled || appState !== "playing" || candidates.length === 0) {
         panel.style.display = 'none';
         return;
     }
