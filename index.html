@@ -69,6 +69,12 @@
             display: flex;
             flex-wrap: wrap;
         }
+        #registered-play-status {
+            display: none;
+            margin: 4px 0 8px;
+            color: #078232;
+            font-weight: bold;
+        }
         /* 出す予定のカードが空でも1段ぶんのスペースを確保（ガタつき防止） */
         #selected-row:empty::before{
           content: "";
@@ -220,6 +226,7 @@
         <section id="selected-section">
           <div class="section-title">出す予定のカード：</div>
           <div id="selected-row" class="card-row"></div>
+          <div id="registered-play-status"></div>
         </section>
 
         <!-- 合成数場（合成数出しモード時に表示） -->
@@ -280,6 +287,8 @@ let turnTimerId = null;
 let lastTurnName = null;
 let appState = "room-list";
 let registeredPrimeCount = 0;
+let registeredPrimeValues = new Set();
+let registeredCompositeValues = new Set();
 
 // ゲーム状態
 // field-numberは直接DOMに
@@ -641,6 +650,8 @@ function saveRegisteredPrimes() {
 
     localStorage.setItem("primeqk_registered_prime_text", primeInput.value);
     localStorage.setItem("primeqk_registered_composite_text", compositeInput.value);
+    rebuildRegisteredValueSets();
+    updateRegisteredPlayStatus();
     if (status) status.innerText = "登録中...";
     ws.send(JSON.stringify({
         type: "set_registered_numbers",
@@ -667,6 +678,8 @@ function renderRegisteredPrimeStatus(msg) {
         compositeInput.value = msg.sample_composite_text;
         localStorage.setItem("primeqk_registered_composite_text", compositeInput.value);
     }
+    rebuildRegisteredValueSets();
+    updateRegisteredPlayStatus();
     if (!status) return;
 
     const primeErrors = msg.prime_errors || msg.errors || [];
@@ -693,6 +706,76 @@ function loadRegisteredPrimeDraft() {
     const compositeInput = document.getElementById('registered-composite-input');
     if (primeInput) primeInput.value = localStorage.getItem("primeqk_registered_prime_text") || "";
     if (compositeInput) compositeInput.value = localStorage.getItem("primeqk_registered_composite_text") || "";
+    rebuildRegisteredValueSets();
+}
+
+function registeredPatternToValue(pattern) {
+    const faceValues = {t: "10", j: "11", q: "12", k: "13"};
+    const text = String(pattern || "").trim().toLowerCase();
+    if (!/^[0-9tjqk]+$/.test(text)) return null;
+    const valueText = [...text].map(ch => faceValues[ch] || ch).join("");
+    if (!valueText || valueText.startsWith("0")) return null;
+    return valueText;
+}
+
+function rebuildRegisteredValueSets() {
+    const primeInput = document.getElementById('registered-prime-input');
+    const compositeInput = document.getElementById('registered-composite-input');
+    registeredPrimeValues = new Set();
+    registeredCompositeValues = new Set();
+
+    const primeText = primeInput ? primeInput.value : "";
+    primeText.split(/[\s,、，]+/).forEach(token => {
+        const value = registeredPatternToValue(token);
+        if (value !== null) registeredPrimeValues.add(value);
+    });
+
+    const compositeText = compositeInput ? compositeInput.value : "";
+    compositeText.split(/\r?\n/).forEach(line => {
+        const left = line.split("=")[0].split("|")[0].trim();
+        const token = left.split(/\s+/)[0];
+        const value = registeredPatternToValue(token);
+        if (value !== null) registeredCompositeValues.add(value);
+    });
+}
+
+function selectedCardsNumber() {
+    if (!selectedCards.length) return null;
+    const ranks = [];
+    let jokerIndex = 0;
+    for (const card of selectedCards) {
+        if (card.is_joker) {
+            const value = jokerAssignedRanks[jokerIndex++];
+            if (value === undefined || String(value) === "inf") return null;
+            ranks.push(String(value));
+        } else {
+            ranks.push(String(card.rank));
+        }
+    }
+    const text = ranks.join("");
+    if (!text || text.startsWith("0")) return null;
+    return text;
+}
+
+function updateRegisteredPlayStatus() {
+    const el = document.getElementById('registered-play-status');
+    if (!el) return;
+    el.style.display = 'none';
+    el.innerText = "";
+    if (currentRoomPrimeRule !== "registered") return;
+
+    const number = selectedCardsNumber();
+    if (number === null) return;
+
+    if (compositeMode) {
+        if (registeredCompositeValues.has(number)) {
+            el.innerText = `登録済み合成数: ${number}`;
+            el.style.display = 'block';
+        }
+    } else if (registeredPrimeValues.has(number)) {
+        el.innerText = `登録済み素数: ${number}`;
+        el.style.display = 'block';
+    }
 }
 
 function toggleStatus() {
@@ -756,6 +839,7 @@ function renderHand() {
     btn.onclick = (ev) => onHandCardClick(card, ev);
     myHandDiv.appendChild(btn);
   });
+  updateRegisteredPlayStatus();
 }
 
 function onHandCardClick(card, ev) {
@@ -771,10 +855,12 @@ function onHandCardClick(card, ev) {
     }
     renderComposite();
     renderHand();
+    updateRegisteredPlayStatus();
   } else {
     // 通常モードは選択トグル
     if (inComposite(card.card_id)) removeFromComposite(card.card_id);
     toggleSelect(card);
+    updateRegisteredPlayStatus();
   }
 }
 
@@ -806,6 +892,7 @@ function toggleSelect(card) {
 
   updateJokerSelectors();
   renderHand();
+  updateRegisteredPlayStatus();
 }
 
 let allowCompositeInRoom = false;
@@ -853,6 +940,7 @@ compositeToggleBtn.onclick = () => {
   }
   renderComposite();
   renderHand();
+  updateRegisteredPlayStatus();
 };
 
 
@@ -864,6 +952,7 @@ function clearComposite() {
   compositeWrapper.style.display = 'none';
   compositeToggleBtn.innerText = '合成数出し';
   showCompositeOps(false);
+  updateRegisteredPlayStatus();
 }
 
 function restoreCardsFromComposite() {
@@ -903,6 +992,7 @@ function renderComposite() {
         compositeTokens.splice(idx,1);
         renderComposite();
         renderHand();
+        updateRegisteredPlayStatus();
       };
     }
     area.appendChild(btn);
@@ -919,6 +1009,7 @@ function renderComposite() {
     sel.onchange = () => {
       compositeJokerAssign[j] = sel.value; // '0'..'13' or 'inf'
       renderComposite(); // 反映
+      updateRegisteredPlayStatus();
     };
     // 0..13 と ∞（inf）を候補に
     ['inf', ...Array.from({length:14},(_,k)=>String(k))].forEach(v=>{
@@ -954,6 +1045,7 @@ document.querySelectorAll('#composite-ops [data-op]').forEach(btn => {
 
     compositeTokens.push({ kind: 'op', op: btn.dataset.op });
     renderComposite();           // 追加→再描画（削除ハンドラ等はrenderComposite内に既にある）
+    updateRegisteredPlayStatus();
   });
 });
 
@@ -994,6 +1086,7 @@ function updateJokerSelectors() {
         selector.onchange = function() {
             jokerAssignedRanks[index] = this.value;
             renderHand();
+            updateRegisteredPlayStatus();
         };
         container.appendChild(document.createTextNode(`ジョーカー${index+1}枚目: `));
         container.appendChild(selector);
@@ -1073,6 +1166,7 @@ function playCards() {
       clearComposite();
       updateJokerSelectors();
       renderHand();
+      updateRegisteredPlayStatus();
       return;
     }
     const jokerCount = selectedCards.filter(c => c.is_joker).length;
@@ -1091,6 +1185,7 @@ function playCards() {
     jokerAssignedRanks = [];
     updateJokerSelectors();
     renderHand();
+    updateRegisteredPlayStatus();
 }
 
 function drawCard() {
