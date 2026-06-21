@@ -79,6 +79,21 @@
             display: none;
             margin: 6px 0 10px;
         }
+        #prime-assist-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 4px 0;
+        }
+        .prime-assist-filter {
+            display: inline-flex;
+            gap: 2px;
+            align-items: center;
+        }
+        .prime-assist-filter button.active {
+            font-weight: bold;
+            border: 2px solid #078232;
+        }
         #prime-assist-list {
             display: flex;
             flex-wrap: wrap;
@@ -236,10 +251,6 @@
           <div class="section-title">出す予定のカード：</div>
           <div id="selected-row" class="card-row"></div>
           <div id="registered-play-status"></div>
-          <div id="prime-assist-panel">
-            <div class="section-title">素数候補：</div>
-            <div id="prime-assist-list"></div>
-          </div>
         </section>
 
         <!-- 合成数場（合成数出しモード時に表示） -->
@@ -269,6 +280,12 @@
             <button data-op="×" id="op-mul-btn">×</button>
             <button data-op="^" id="op-pow-btn">^</button>
           </div>
+        </section>
+
+        <section id="prime-assist-panel">
+          <div class="section-title">素数候補：</div>
+          <div id="prime-assist-controls"></div>
+          <div id="prime-assist-list"></div>
         </section>
 
     </div>
@@ -305,6 +322,34 @@ let registeredPrimeCount = 0;
 let registeredPrimeValues = new Set();
 let registeredCompositeValues = new Set();
 let primeAssistTimerId = null;
+const primeAssistFilterDefs = [
+    {
+        key: "limit_mode",
+        options: [
+            {value: "many", label: "多め"},
+            {value: "ten", label: "10個"}
+        ]
+    },
+    {
+        key: "order",
+        options: [
+            {value: "weak", label: "弱い順"},
+            {value: "strong", label: "強い順"}
+        ]
+    },
+    {
+        key: "count_scope",
+        options: [
+            {value: "field", label: "場の枚数"},
+            {value: "all", label: "全枚数"}
+        ]
+    }
+];
+let primeAssistFilters = {
+    limit_mode: "many",
+    order: "weak",
+    count_scope: "field"
+};
 
 // ゲーム状態
 // field-numberは直接DOMに
@@ -818,6 +863,40 @@ function updateRegisteredPlayStatus() {
     }
 }
 
+function renderPrimeAssistControls() {
+    const controls = document.getElementById('prime-assist-controls');
+    if (!controls || controls.dataset.ready === "1") return;
+    controls.dataset.ready = "1";
+    primeAssistFilterDefs.forEach(def => {
+        const group = document.createElement('span');
+        group.className = 'prime-assist-filter';
+        group.dataset.filterKey = def.key;
+        def.options.forEach(option => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.dataset.filterKey = def.key;
+            btn.dataset.filterValue = option.value;
+            btn.innerText = option.label;
+            btn.onclick = () => {
+                primeAssistFilters[def.key] = option.value;
+                syncPrimeAssistControls();
+                schedulePrimeAssist();
+            };
+            group.appendChild(btn);
+        });
+        controls.appendChild(group);
+    });
+    syncPrimeAssistControls();
+}
+
+function syncPrimeAssistControls() {
+    document.querySelectorAll('#prime-assist-controls button[data-filter-key]').forEach(btn => {
+        const key = btn.dataset.filterKey;
+        const value = btn.dataset.filterValue;
+        btn.classList.toggle('active', primeAssistFilters[key] === value);
+    });
+}
+
 function schedulePrimeAssist() {
     if (primeAssistTimerId !== null) {
         clearTimeout(primeAssistTimerId);
@@ -835,6 +914,7 @@ function requestPrimeAssist() {
     ws.send(JSON.stringify({
         type: "get_prime_assist",
         selected_card_ids: selectedCards.map(card => card.card_id),
+        filters: primeAssistFilters,
         limit: 100
     }));
 }
@@ -843,6 +923,7 @@ function renderPrimeAssist(msg) {
     const panel = document.getElementById('prime-assist-panel');
     const list = document.getElementById('prime-assist-list');
     if (!panel || !list) return;
+    renderPrimeAssistControls();
     list.innerHTML = '';
 
     const candidates = msg.candidates || [];
@@ -856,7 +937,11 @@ function renderPrimeAssist(msg) {
         const btn = document.createElement('button');
         btn.className = 'card-button';
         const kindLabel = candidate.kind === "composite" ? "合" : "素";
-        btn.innerText = `${kindLabel} ${candidate.number}`;
+        const expression = candidate.kind === "composite" && candidate.expression
+            ? `=${candidate.expression}`
+            : "";
+        const countMark = candidate.field_count_match === false ? "*" : "";
+        btn.innerText = `${kindLabel} ${candidate.number}${expression}${countMark}`;
         btn.onclick = () => applyPrimeAssistCandidate(candidate);
         list.appendChild(btn);
     });
@@ -874,6 +959,8 @@ function applyPrimeAssistCandidate(candidate) {
     jokerAssignedRanks = (candidate.assigned_numbers || []).map(String);
     if (candidate.kind === "composite" && currentRoomAllowComposite) {
         compositeMode = true;
+        compositeTokens = ((candidate.composite && candidate.composite.tokens) || []).map(token => ({...token}));
+        compositeJokerAssign = ((candidate.composite && candidate.composite.assigned_numbers) || []).map(String);
         compositeWrapper.style.display = '';
         compositeToggleBtn.innerText = 'キャンセル';
         showCompositeOps(true);
