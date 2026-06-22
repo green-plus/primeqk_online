@@ -982,8 +982,15 @@ function schedulePrimeAssist() {
 function requestPrimeAssist() {
     primeAssistTimerId = null;
     const panel = document.getElementById('prime-assist-panel');
-    if (!currentRoomRegistrationEnabled || !currentRoomAssistEnabled || appState !== "playing" || !myHand.length) {
+    const list = document.getElementById('prime-assist-list');
+    renderPrimeAssistControls();
+    if (!currentRoomRegistrationEnabled || !currentRoomAssistEnabled || appState !== "playing") {
         if (panel) panel.style.display = 'none';
+        return;
+    }
+    if (panel) panel.style.display = 'block';
+    if (!myHand.length) {
+        if (list) list.innerHTML = '';
         return;
     }
     ws.send(JSON.stringify({
@@ -1018,26 +1025,28 @@ function appendAssistCards(parent, cards, assignedNumbers) {
     let jokerIndex = 0;
     (cards || []).forEach(card => {
         if (card.is_joker || card.suit === "X") {
-            const assigned = (assignedNumbers || [])[jokerIndex++] ?? "?";
-            parent.appendChild(document.createTextNode('X='));
-            appendAssistRank(parent, assigned, Number(assigned) >= 10);
+            jokerIndex++;
+            parent.appendChild(document.createTextNode('X'));
         } else {
             appendAssistRank(parent, card.rank, 10 <= Number(card.rank) && Number(card.rank) <= 13);
         }
+    });
+    jokerIndex = 0;
+    (cards || []).forEach(card => {
+        if (!(card.is_joker || card.suit === "X")) return;
+        const assigned = (assignedNumbers || [])[jokerIndex++] ?? "?";
+        if (String(assigned) === "inf") return;
+        parent.appendChild(document.createTextNode('|X='));
+        appendAssistRank(parent, assigned, Number(assigned) >= 10);
     });
 }
 
 function appendAssistCandidateLabel(parent, candidate) {
     const kindLabel = candidate.kind === "composite" ? "合" : "素";
-    parent.appendChild(document.createTextNode(`${kindLabel} ${candidate.number}[`));
+    parent.appendChild(document.createTextNode(`${kindLabel} `));
     appendAssistCards(parent, candidate.cards, candidate.assigned_numbers);
-    parent.appendChild(document.createTextNode(']'));
     if (candidate.kind === "composite" && candidate.expression) {
         parent.appendChild(document.createTextNode(`=${candidate.expression}`));
-    }
-    if (candidate.kind === "composite" && candidate.composite) {
-        parent.appendChild(document.createTextNode(' 材:'));
-        appendAssistCards(parent, candidate.composite.cards, candidate.composite.assigned_numbers);
     }
     if (candidate.field_count_match === false) {
         parent.appendChild(document.createTextNode('*'));
@@ -1052,7 +1061,7 @@ function renderPrimeAssist(msg) {
     list.innerHTML = '';
 
     const candidates = msg.candidates || [];
-    if (!currentRoomRegistrationEnabled || !currentRoomAssistEnabled || appState !== "playing" || candidates.length === 0) {
+    if (!currentRoomRegistrationEnabled || !currentRoomAssistEnabled || appState !== "playing") {
         panel.style.display = 'none';
         return;
     }
