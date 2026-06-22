@@ -51,6 +51,9 @@
             margin: 2px;
             cursor: pointer;
         }
+        .room-section-title {
+            margin: 10px 0 4px;
+        }
         #field-number.revolution {
             background-color: black;
             color: white;
@@ -684,20 +687,41 @@ function updateTurnElapsedLabel() {
 function updateRoomDisplay() {
     const roomsDiv = document.getElementById('rooms');
     roomsDiv.innerHTML = '';
-    Object.keys(roomRules).sort((a, b) => {
-        const na = Number(a.replace('room_', ''));
-        const nb = Number(b.replace('room_', ''));
-        return na - nb;
-    }).forEach(roomId => {
-        const roomEl = document.createElement('div');
-        const count = roomCounts[roomId] || 0;
-        roomEl.innerText = `${roomId} (${roomRules[roomId]}) - 人数:${count}`;
-        const joinBtn = document.createElement('button');
-        joinBtn.innerText = '入室';
-        joinBtn.onclick = () => joinRoom(roomId);
-        roomEl.appendChild(joinBtn);
-        roomsDiv.appendChild(roomEl);
+    const sections = [
+        {title: "Classic", min: 1, max: 6},
+        {title: "Plus", min: 7, max: 12},
+        {title: "Neo", min: 13, max: 99}
+    ];
+    const sortedRoomIds = Object.keys(roomRules).sort((a, b) => roomNumber(a) - roomNumber(b));
+
+    sections.forEach(section => {
+        const roomIds = sortedRoomIds.filter(roomId => {
+            const number = roomNumber(roomId);
+            return section.min <= number && number <= section.max;
+        });
+        if (!roomIds.length) return;
+
+        const heading = document.createElement('h3');
+        heading.className = 'room-section-title';
+        heading.innerText = section.title;
+        roomsDiv.appendChild(heading);
+
+        roomIds.forEach(roomId => {
+            const roomEl = document.createElement('div');
+            const count = roomCounts[roomId] || 0;
+            roomEl.innerText = `${roomId} (${roomRules[roomId]}) - 人数:${count}`;
+            const joinBtn = document.createElement('button');
+            joinBtn.innerText = '入室';
+            joinBtn.onclick = () => joinRoom(roomId);
+            roomEl.appendChild(joinBtn);
+            roomsDiv.appendChild(roomEl);
+        });
     });
+}
+
+function roomNumber(roomId) {
+    const match = String(roomId).match(/^room_(\d+)$/);
+    return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
 function joinRoom(roomId) {
