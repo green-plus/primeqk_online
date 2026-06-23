@@ -26,9 +26,6 @@
             margin-top: 4px;
             background: #eeeeff;
             color: #000;
-            font-family: sans-serif;
-            font-size: 22px;
-            line-height: 1.05;
         }
         .score-record summary {
             display: block;
@@ -62,6 +59,10 @@
         .room-section-title {
             margin: 10px 0 4px;
         }
+        .room-section-description {
+            margin: 0 0 4px;
+            color: #555;
+        }
         #field-number.revolution {
             background-color: black;
             color: white;
@@ -93,7 +94,7 @@
         #registered-play-status {
             display: none;
             vertical-align: middle;
-            margin: 0;
+            margin: 0 0 0 8px;
             color: #078232;
             font-weight: bold;
         }
@@ -361,6 +362,11 @@ let registeredPrimeCount = 0;
 let registeredPrimeValues = new Set();
 let registeredCompositeValues = new Set();
 let primeAssistTimerId = null;
+const roomCategoryDescriptions = {
+    Classic: "いつもの素数大富豪。手札枚数を減らせば初心者も安心。",
+    Plus: "様々な特殊ルールを、自動判定付きで遊ぼう。",
+    Neo: "素数リストでアシストされる、全く新しい体験の素数大富豪。"
+};
 const primeAssistFilterDefs = [
     {
         key: "target_scope",
@@ -427,12 +433,29 @@ function arrangeGameControls() {
     const selectedRow = document.getElementById('selected-row');
     const registeredStatus = document.getElementById('registered-play-status');
     if (selectedRow && registeredStatus) {
-        selectedRow.before(registeredStatus);
+        const selectedSection = document.getElementById('selected-section');
+        const title = selectedSection ? selectedSection.querySelector('.section-title') : null;
+        if (title) {
+            let header = document.getElementById('selected-header');
+            if (!header) {
+                header = document.createElement('div');
+                header.id = 'selected-header';
+                selectedRow.before(header);
+            }
+            header.appendChild(title);
+            header.appendChild(registeredStatus);
+        } else if (registeredStatus.parentElement !== selectedRow.parentElement) {
+            selectedRow.before(registeredStatus);
+        }
     }
     const handSection = document.getElementById('hand-section');
     const jokerSelector = document.getElementById('joker-rank-selector');
     if (handSection && jokerSelector) {
         handSection.after(jokerSelector);
+    }
+    const compositeJokerSelectors = document.getElementById('composite-joker-selectors');
+    if (jokerSelector && compositeJokerSelectors) {
+        jokerSelector.after(compositeJokerSelectors);
     }
 }
 arrangeGameControls();
@@ -626,11 +649,13 @@ ws.onmessage = (event) => {
         renderHand();
         renderComposite();
     }
-    else if (msg.type === "next_turn") {
+    else if (msg.type === "turn_update" || msg.type === "next_turn") {
         // ターン表示の更新
         renderCurrentTurn(msg.current_turn);
-        startTurnTimer(msg.current_turn);
-        console.log("Next turn = ", msg.current_turn);
+        if (msg.reset_timer !== false) {
+            startTurnTimer(msg.current_turn);
+        }
+        console.log("Turn update = ", msg.current_turn);
         schedulePrimeAssist();
     }
     else if (msg.type === "game_over") {
@@ -801,6 +826,12 @@ function updateRoomDisplay() {
         heading.className = 'room-section-title';
         heading.innerText = category;
         roomsDiv.appendChild(heading);
+        if (roomCategoryDescriptions[category]) {
+            const description = document.createElement('div');
+            description.className = 'room-section-description';
+            description.innerText = roomCategoryDescriptions[category];
+            roomsDiv.appendChild(description);
+        }
 
         roomIds.forEach(roomId => {
             const roomEl = document.createElement('div');
@@ -1000,11 +1031,11 @@ function updateRegisteredPlayStatus() {
     if (compositeMode) {
         if (registeredCompositeValues.has(number)) {
             el.innerText = `登録済み合成数: ${number}`;
-            el.style.display = 'block';
+            el.style.display = 'inline-block';
         }
     } else if (registeredPrimeValues.has(number)) {
         el.innerText = `登録済み素数: ${number}`;
-        el.style.display = 'block';
+        el.style.display = 'inline-block';
     }
 }
 
