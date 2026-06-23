@@ -343,8 +343,8 @@ const primeAssistFilterDefs = [
         key: "target_scope",
         options: [
             {value: "auto", label: "対象:自動"},
-            {value: "selected", label: "選択中"},
-            {value: "unselected", label: "未選択"}
+            {value: "selected", label: "対象:選択中"},
+            {value: "unselected", label: "対象:未選択"}
         ]
     },
     {
@@ -377,6 +377,8 @@ const primeAssistFilterDefs = [
         ]
     }
 ];
+primeAssistFilterDefs[0].control = "cycle";
+primeAssistFilterDefs[0].options.push({value: "all", label: "対象:手札全体"});
 let primeAssistFilters = {
     target_scope: "auto",
     limit_mode: "ten",
@@ -946,6 +948,22 @@ function renderPrimeAssistControls() {
         const group = document.createElement('span');
         group.className = 'prime-assist-filter';
         group.dataset.filterKey = def.key;
+        if (def.control === "cycle") {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.dataset.filterKey = def.key;
+            btn.dataset.filterCycle = "1";
+            btn.onclick = () => {
+                const currentIndex = def.options.findIndex(option => option.value === primeAssistFilters[def.key]);
+                const nextIndex = (currentIndex + 1) % def.options.length;
+                primeAssistFilters[def.key] = def.options[nextIndex].value;
+                syncPrimeAssistControls();
+                schedulePrimeAssist();
+            };
+            group.appendChild(btn);
+            controls.appendChild(group);
+            return;
+        }
         def.options.forEach(option => {
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -967,6 +985,13 @@ function renderPrimeAssistControls() {
 function syncPrimeAssistControls() {
     document.querySelectorAll('#prime-assist-controls button[data-filter-key]').forEach(btn => {
         const key = btn.dataset.filterKey;
+        if (btn.dataset.filterCycle === "1") {
+            const def = primeAssistFilterDefs.find(item => item.key === key);
+            const option = def && def.options.find(item => item.value === primeAssistFilters[key]);
+            btn.innerText = option ? option.label : key;
+            btn.classList.add('active');
+            return;
+        }
         const value = btn.dataset.filterValue;
         btn.classList.toggle('active', primeAssistFilters[key] === value);
     });
