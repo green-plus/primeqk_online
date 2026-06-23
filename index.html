@@ -26,6 +26,7 @@
             margin-top: 4px;
             background: #eeeeff;
             color: #000;
+            font-family: sans-serif;
         }
         .score-record summary {
             display: block;
@@ -125,9 +126,24 @@
             gap: 2px;
             align-items: center;
         }
+        .prime-assist-filter select {
+            height: 24px;
+        }
         .prime-assist-filter button.active {
             font-weight: bold;
             border: 2px solid #078232;
+        }
+        #room-description-panel {
+            margin: 0 0 8px;
+        }
+        #room-description-panel summary {
+            cursor: pointer;
+        }
+        #room-description-text {
+            margin-top: 4px;
+            color: #333;
+            max-width: 720px;
+            white-space: pre-wrap;
         }
         #prime-assist-list {
             display: flex;
@@ -231,6 +247,10 @@
 <!-- ルーム内共通部分（入室中と対戦中で共通） -->
 <div id="state-common" style="display:none;">
     <h2 id="current-room"></h2>
+    <details id="room-description-panel" style="display:none;">
+        <summary>説明</summary>
+        <div id="room-description-text"></div>
+    </details>
     <div>
         状態: <span id="player-status">観戦中</span>
         <button id="status-btn">参加する</button>
@@ -347,6 +367,7 @@ let roomCompositeFlags = {};
 let roomPrimeRules = {};
 let roomAssistFlags = {};
 let roomRegistrationFlags = {};
+let roomDescriptions = {};
 let currentRoomAllowComposite = false;
 let currentRoomPrimeRule = null;
 let currentRoomAssistEnabled = false;
@@ -419,13 +440,22 @@ primeAssistFilterDefs[2].options = [
 ];
 primeAssistFilterDefs[3].options = [
     {value: "field", label: "出せる数"},
-    {value: "all", label: "全枚数"}
+    {value: "all", label: "全枚数"},
+    {value: "specified", label: "枚数指定"}
+];
+primeAssistFilterDefs[3].selectKey = "card_count";
+primeAssistFilterDefs[3].selectOptions = [
+    ...Array.from({length: 11}, (_, index) => {
+        const count = String(index + 1);
+        return {value: count, label: `${count}枚`};
+    })
 ];
 let primeAssistFilters = {
     target_scope: "all",
     limit_mode: "ten",
     order: "strong",
     count_scope: "field",
+    card_count: "1",
     face_mode: "letters"
 };
 
@@ -493,6 +523,7 @@ ws.onmessage = (event) => {
           if (msg.prime_rules) roomPrimeRules = msg.prime_rules;
           if (msg.assist_enabled) roomAssistFlags = msg.assist_enabled;
           if (msg.registration_enabled) roomRegistrationFlags = msg.registration_enabled;
+          if (msg.room_descriptions) roomDescriptions = msg.room_descriptions;
         updateRoomDisplay();
     }
     else if (msg.type === "your_id") {
@@ -503,6 +534,7 @@ ws.onmessage = (event) => {
         roomCounts[msg.room_id] = msg.count;
         roomRules[msg.room_id]  = msg.rule;   // 受け取る
         if (msg.category) roomCategories[msg.room_id] = msg.category;
+        if (typeof msg.description === "string") roomDescriptions[msg.room_id] = msg.description;
         if (typeof msg.allow_composite === "boolean") roomCompositeFlags[msg.room_id] = msg.allow_composite;
         if (msg.prime_rule) roomPrimeRules[msg.room_id] = msg.prime_rule;
         if (typeof msg.assist_enabled === "boolean") roomAssistFlags[msg.room_id] = msg.assist_enabled;
@@ -552,6 +584,10 @@ ws.onmessage = (event) => {
             currentRoomRegistrationEnabled = msg.registration_enabled;
             syncRegisteredPrimePanel();
         }
+        if (typeof msg.description === "string") {
+            roomDescriptions[currentRoom] = msg.description;
+            updateRoomDescription();
+        }
         if (typeof msg.assist_enabled === "boolean") {
             currentRoomAssistEnabled = msg.assist_enabled;
             schedulePrimeAssist();
@@ -575,6 +611,10 @@ ws.onmessage = (event) => {
         if (typeof msg.registration_enabled === "boolean") {
             currentRoomRegistrationEnabled = msg.registration_enabled;
             syncRegisteredPrimePanel();
+        }
+        if (typeof msg.description === "string") {
+            roomDescriptions[currentRoom] = msg.description;
+            updateRoomDescription();
         }
         if (typeof msg.assist_enabled === "boolean") {
             currentRoomAssistEnabled = msg.assist_enabled;
@@ -671,7 +711,7 @@ ws.onmessage = (event) => {
         renderScoreRecord(msg);
     }
     else if (msg.type === "registered_numbers_updated" || msg.type === "registered_primes_updated") {
-        registeredPrimeCount = msg.count || 0;
+        registeredPrimeCount = msg.prime_count ?? msg.count ?? 0;
         renderRegisteredPrimeStatus(msg);
     }
     else if (msg.type === "prime_assist_result") {
@@ -707,13 +747,18 @@ function showConnectionStatus(message) {
     appendSystemMessage(message);
 }
 
+function updatePlayButtonState() {
+    const playBtn = document.getElementById('play-btn');
+    if (!playBtn) return;
+    playBtn.disabled = appState !== "playing" || !isWaiting || selectedCards.length === 0;
+}
+
 function renderScoreRecord(msg) {
     const chatBox = document.getElementById('chat-box');
     if (!chatBox) return;
 
     const details = document.createElement('details');
     details.className = 'score-record';
-    details.open = true;
     const summary = document.createElement('summary');
     summary.textContent = '数譜';
     details.appendChild(summary);
@@ -851,6 +896,16 @@ function roomNumber(roomId) {
     return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
+function updateRoomDescription() {
+    const panel = document.getElementById('room-description-panel');
+    const text = document.getElementById('room-description-text');
+    if (!panel || !text) return;
+    const description = currentRoom ? (roomDescriptions[currentRoom] || "") : "";
+    text.innerText = description;
+    panel.style.display = description ? 'block' : 'none';
+    if (!description) panel.open = false;
+}
+
 function joinRoom(roomId) {
     ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
     currentRoom = roomId;
@@ -863,6 +918,7 @@ function joinRoom(roomId) {
     currentRoomPrimeRule = roomPrimeRules[roomId] || null;
     currentRoomAssistEnabled = !!roomAssistFlags[roomId];
     currentRoomRegistrationEnabled = !!roomRegistrationFlags[roomId] || currentRoomPrimeRule === "registered";
+    updateRoomDescription();
     syncCompositeAvailability();
     syncRegisteredPrimePanel();
     // 状態更新はサーバーからの room_state_initialization メッセージで行う
@@ -871,6 +927,7 @@ function joinRoom(roomId) {
 function leaveRoom() {
     ws.send(JSON.stringify({type: "leave_room"}));
     currentRoom = null;
+    updateRoomDescription();
     isWaiting = false;
     document.getElementById('player-status').innerText = '観戦中';
     document.getElementById('status-btn').innerText = '参加する';
@@ -910,7 +967,8 @@ function saveRegisteredPrimes() {
 
     localStorage.setItem("primeqk_registered_prime_text", primeInput.value);
     localStorage.setItem("primeqk_registered_composite_text", compositeInput.value);
-    rebuildRegisteredValueSets();
+    registeredPrimeValues = new Set();
+    registeredCompositeValues = new Set();
     updateRegisteredPlayStatus();
     schedulePrimeAssist();
     if (status) status.innerText = "登録中...";
@@ -939,7 +997,12 @@ function renderRegisteredPrimeStatus(msg) {
         compositeInput.value = msg.sample_composite_text;
         localStorage.setItem("primeqk_registered_composite_text", compositeInput.value);
     }
-    rebuildRegisteredValueSets();
+    if (Array.isArray(msg.prime_values) || Array.isArray(msg.composite_values)) {
+        registeredPrimeValues = new Set((msg.prime_values || []).map(value => String(value)));
+        registeredCompositeValues = new Set((msg.composite_values || []).map(value => String(value)));
+    } else {
+        rebuildRegisteredValueSets();
+    }
     updateRegisteredPlayStatus();
     if (!status) return;
 
@@ -967,7 +1030,8 @@ function loadRegisteredPrimeDraft() {
     const compositeInput = document.getElementById('registered-composite-input');
     if (primeInput) primeInput.value = localStorage.getItem("primeqk_registered_prime_text") || "";
     if (compositeInput) compositeInput.value = localStorage.getItem("primeqk_registered_composite_text") || "";
-    rebuildRegisteredValueSets();
+    registeredPrimeValues = new Set();
+    registeredCompositeValues = new Set();
 }
 
 function registeredPatternToValue(pattern) {
@@ -1076,6 +1140,22 @@ function renderPrimeAssistControls() {
             };
             group.appendChild(btn);
         });
+        if (def.selectKey) {
+            const select = document.createElement('select');
+            select.dataset.filterSelectKey = def.selectKey;
+            (def.selectOptions || []).forEach(option => {
+                const opt = document.createElement('option');
+                opt.value = option.value;
+                opt.innerText = option.label;
+                select.appendChild(opt);
+            });
+            select.onchange = () => {
+                primeAssistFilters[def.selectKey] = select.value;
+                syncPrimeAssistControls();
+                schedulePrimeAssist();
+            };
+            group.appendChild(select);
+        }
         controls.appendChild(group);
     });
     syncPrimeAssistControls();
@@ -1093,6 +1173,12 @@ function syncPrimeAssistControls() {
         }
         const value = btn.dataset.filterValue;
         btn.classList.toggle('active', primeAssistFilters[key] === value);
+    });
+    document.querySelectorAll('#prime-assist-controls select[data-filter-select-key]').forEach(select => {
+        const key = select.dataset.filterSelectKey;
+        select.value = primeAssistFilters[key] || "1";
+        const parentKey = select.closest('.prime-assist-filter')?.dataset.filterKey;
+        select.style.display = parentKey && primeAssistFilters[parentKey] === "specified" ? '' : 'none';
     });
 }
 
@@ -1287,6 +1373,7 @@ function renderHand() {
     myHandDiv.appendChild(btn);
   });
   updateRegisteredPlayStatus();
+  updatePlayButtonState();
   schedulePrimeAssist();
 }
 
@@ -1549,6 +1636,10 @@ function updateJokerSelectors() {
 function playCards() {
     // 自分の手札を card_id で引けるように（Joker判定に使用）
     const handById = Object.fromEntries((myHand || []).map(c => [c.card_id, c]));
+    if (selectedCards.length === 0) {
+        updatePlayButtonState();
+        return;
+    }
 
     if (compositeMode) {
       if (!currentRoomAllowComposite) {
@@ -1761,6 +1852,7 @@ function setState(state) {
         document.getElementById('start-btn').style.display = 'none';
     }
     syncRegisteredPrimePanel();
+    updatePlayButtonState();
 }
 
 
