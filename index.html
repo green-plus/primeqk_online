@@ -80,10 +80,33 @@
             display: flex;
             flex-wrap: wrap;
         }
+        #selected-section > .section-title {
+            display: inline-block;
+            margin-right: 8px;
+        }
+        #selected-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
         #registered-play-status {
             display: none;
-            margin: 4px 0 8px;
+            vertical-align: middle;
+            margin: 0;
             color: #078232;
+            font-weight: bold;
+        }
+        .my-turn {
+            color: #078232;
+            font-weight: bold;
+        }
+        #turn-elapsed.elapsed-warning {
+            color: #d97800;
+            font-weight: bold;
+        }
+        #turn-elapsed.elapsed-danger {
+            color: #c62828;
             font-weight: bold;
         }
         #prime-assist-panel {
@@ -378,14 +401,41 @@ const primeAssistFilterDefs = [
     }
 ];
 primeAssistFilterDefs[0].control = "cycle";
-primeAssistFilterDefs[0].options.push({value: "all", label: "対象:手札全体"});
+primeAssistFilterDefs[0].options = [
+    {value: "all", label: "対象:手札全体"},
+    {value: "selected", label: "対象:選択中"},
+    {value: "unselected", label: "対象:未選択"}
+];
+primeAssistFilterDefs[2].options = [
+    {value: "strong", label: "強い順"},
+    {value: "weak", label: "弱い順"},
+    {value: "efficient", label: "効率順"}
+];
+primeAssistFilterDefs[3].options = [
+    {value: "field", label: "出せる数"},
+    {value: "all", label: "全枚数"}
+];
 let primeAssistFilters = {
-    target_scope: "auto",
+    target_scope: "all",
     limit_mode: "ten",
-    order: "weak",
+    order: "strong",
     count_scope: "field",
     face_mode: "letters"
 };
+
+function arrangeGameControls() {
+    const selectedRow = document.getElementById('selected-row');
+    const registeredStatus = document.getElementById('registered-play-status');
+    if (selectedRow && registeredStatus) {
+        selectedRow.before(registeredStatus);
+    }
+    const handSection = document.getElementById('hand-section');
+    const jokerSelector = document.getElementById('joker-rank-selector');
+    if (handSection && jokerSelector) {
+        handSection.after(jokerSelector);
+    }
+}
+arrangeGameControls();
 
 // ゲーム状態
 // field-numberは直接DOMに
@@ -519,7 +569,7 @@ ws.onmessage = (event) => {
     else if (msg.type === "game_update") {
         // action_result, penalty, passの統合
         // 現在のターン、デッキ枚数、場のカードの更新
-        document.getElementById('current-turn').innerText = msg.current_turn;
+        renderCurrentTurn(msg.current_turn);
         if (msg.current_turn !== lastTurnName) {
             startTurnTimer(msg.current_turn);
         }
@@ -578,7 +628,7 @@ ws.onmessage = (event) => {
     }
     else if (msg.type === "next_turn") {
         // ターン表示の更新
-        document.getElementById('current-turn').innerText = msg.current_turn;
+        renderCurrentTurn(msg.current_turn);
         startTurnTimer(msg.current_turn);
         console.log("Next turn = ", msg.current_turn);
         schedulePrimeAssist();
@@ -670,6 +720,18 @@ function clearLocalHandState() {
     document.getElementById('hand-counts').innerText = "(未設定)";
 }
 
+function renderCurrentTurn(turnName) {
+    const currentTurnEl = document.getElementById('current-turn');
+    if (!currentTurnEl) return;
+    currentTurnEl.classList.remove('my-turn');
+    if (turnName && playerName && turnName === playerName) {
+        currentTurnEl.innerText = `${turnName}（自分）`;
+        currentTurnEl.classList.add('my-turn');
+    } else {
+        currentTurnEl.innerText = turnName || "(未設定)";
+    }
+}
+
 function startTurnTimer(turnName) {
     if (!turnName) {
         stopTurnTimer();
@@ -699,7 +761,10 @@ function stopTurnTimer() {
     lastTurnName = null;
 
     const elapsedEl = document.getElementById('turn-elapsed');
-    if (elapsedEl) elapsedEl.innerText = '0';
+    if (elapsedEl) {
+        elapsedEl.innerText = '0';
+        elapsedEl.classList.remove('elapsed-warning', 'elapsed-danger');
+    }
 }
 
 function updateTurnElapsedLabel() {
@@ -708,11 +773,14 @@ function updateTurnElapsedLabel() {
 
     if (turnStartAt === null) {
         elapsedEl.innerText = '0';
+        elapsedEl.classList.remove('elapsed-warning', 'elapsed-danger');
         return;
     }
 
     const elapsedSec = Math.floor((Date.now() - turnStartAt) / 1000);
     elapsedEl.innerText = String(elapsedSec);
+    elapsedEl.classList.toggle('elapsed-warning', elapsedSec >= 60 && elapsedSec < 120);
+    elapsedEl.classList.toggle('elapsed-danger', elapsedSec >= 120);
 }
 
 function updateRoomDisplay() {
