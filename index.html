@@ -255,6 +255,7 @@
         状態: <span id="player-status">観戦中</span>
         <button id="status-btn">参加する</button>
         <button id="start-btn" style="display:none;">開始する</button>
+        <select id="cpu-profile-select" style="display:none;"></select>
         <button id="add-cpu-btn" style="display:none;">CPU追加</button>
         <button id="remove-cpu-btn" style="display:none;">CPU退出</button>
         <button id="leave-btn">退室する</button>
@@ -277,6 +278,7 @@
         <div>
             <button id="registered-prime-save-btn">登録</button>
             <button id="registered-prime-clear-btn">クリア</button>
+            <select id="registered-prime-sample-select"></select>
             <button id="registered-prime-sample-btn">サンプルを登録</button>
         </div>
         <div id="registered-prime-status">未登録</div>
@@ -370,6 +372,7 @@ let roomPrimeRules = {};
 let roomAssistFlags = {};
 let roomRegistrationFlags = {};
 let roomDescriptions = {};
+let roomCpuProfiles = {};
 let currentRoomAllowComposite = false;
 let currentRoomPrimeRule = null;
 let currentRoomAssistEnabled = false;
@@ -386,6 +389,7 @@ let appState = "room-list";
 let registeredPrimeCount = 0;
 let registeredPrimeValues = new Set();
 let registeredCompositeValues = new Set();
+let registeredSampleOptions = [];
 let primeAssistTimerId = null;
 const roomCategoryDescriptions = {
     Classic: "いつもの素数大富豪。手札枚数を減らせば初心者も安心。",
@@ -528,6 +532,11 @@ ws.onmessage = (event) => {
           if (msg.assist_enabled) roomAssistFlags = msg.assist_enabled;
           if (msg.registration_enabled) roomRegistrationFlags = msg.registration_enabled;
           if (msg.room_descriptions) roomDescriptions = msg.room_descriptions;
+          if (msg.cpu_profiles) roomCpuProfiles = msg.cpu_profiles;
+          if (Array.isArray(msg.registered_sample_options)) {
+              registeredSampleOptions = msg.registered_sample_options;
+              renderRegisteredSampleOptions();
+          }
         updateRoomDisplay();
     }
     else if (msg.type === "your_id") {
@@ -539,6 +548,7 @@ ws.onmessage = (event) => {
         roomRules[msg.room_id]  = msg.rule;   // 受け取る
         if (msg.category) roomCategories[msg.room_id] = msg.category;
         if (typeof msg.description === "string") roomDescriptions[msg.room_id] = msg.description;
+        if (Array.isArray(msg.cpu_profiles)) roomCpuProfiles[msg.room_id] = msg.cpu_profiles;
         if (typeof msg.allow_composite === "boolean") roomCompositeFlags[msg.room_id] = msg.allow_composite;
         if (msg.prime_rule) roomPrimeRules[msg.room_id] = msg.prime_rule;
         if (typeof msg.assist_enabled === "boolean") roomAssistFlags[msg.room_id] = msg.assist_enabled;
@@ -547,6 +557,7 @@ ws.onmessage = (event) => {
 
         if (currentRoom === msg.room_id) {
             currentRoomHasCpu = Array.isArray(msg.player_list) && msg.player_list.some(p => p.is_cpu);
+            if (Array.isArray(msg.cpu_profiles)) roomCpuProfiles[msg.room_id] = msg.cpu_profiles;
             updateCpuControls();
             if (typeof msg.registration_enabled === "boolean") {
                 currentRoomRegistrationEnabled = msg.registration_enabled;
@@ -597,6 +608,10 @@ ws.onmessage = (event) => {
         if (typeof msg.description === "string") {
             roomDescriptions[currentRoom] = msg.description;
             updateRoomDescription();
+        }
+        if (Array.isArray(msg.cpu_profiles)) {
+            roomCpuProfiles[currentRoom] = msg.cpu_profiles;
+            updateCpuControls();
         }
         if (typeof msg.assist_enabled === "boolean") {
             currentRoomAssistEnabled = msg.assist_enabled;
@@ -932,9 +947,25 @@ function updateRoomDescription() {
 function updateCpuControls() {
     const addBtn = document.getElementById('add-cpu-btn');
     const removeBtn = document.getElementById('remove-cpu-btn');
-    if (!addBtn || !removeBtn) return;
+    const select = document.getElementById('cpu-profile-select');
+    if (!addBtn || !removeBtn || !select) return;
     const canEditCpu = !!currentRoom && currentRoomState !== "playing";
-    addBtn.style.display = canEditCpu && !currentRoomHasCpu ? 'inline' : 'none';
+    const profiles = currentRoom ? (roomCpuProfiles[currentRoom] || []) : [];
+    const selectedKey = select.value;
+    select.innerHTML = '';
+    profiles.forEach(profile => {
+        const option = document.createElement('option');
+        option.value = profile.key;
+        option.textContent = profile.label;
+        option.title = profile.description || '';
+        select.appendChild(option);
+    });
+    if (profiles.some(profile => profile.key === selectedKey)) {
+        select.value = selectedKey;
+    }
+    const canAddCpu = canEditCpu && !currentRoomHasCpu && profiles.length > 0;
+    select.style.display = canAddCpu ? 'inline' : 'none';
+    addBtn.style.display = canAddCpu ? 'inline' : 'none';
     removeBtn.style.display = canEditCpu && currentRoomHasCpu ? 'inline' : 'none';
 }
 
@@ -978,6 +1009,22 @@ function leaveRoom() {
     setState("room-list");
 }
 
+function renderRegisteredSampleOptions() {
+    const select = document.getElementById('registered-prime-sample-select');
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = '';
+    registeredSampleOptions.forEach(option => {
+        const opt = document.createElement('option');
+        opt.value = option.key;
+        opt.innerText = option.label;
+        select.appendChild(opt);
+    });
+    if (previous && registeredSampleOptions.some(option => option.key === previous)) {
+        select.value = previous;
+    }
+}
+
 function syncRegisteredPrimePanel() {
     const panel = document.getElementById('registered-prime-panel');
     const primeInput = document.getElementById('registered-prime-input');
@@ -985,7 +1032,8 @@ function syncRegisteredPrimePanel() {
     const saveBtn = document.getElementById('registered-prime-save-btn');
     const clearBtn = document.getElementById('registered-prime-clear-btn');
     const sampleBtn = document.getElementById('registered-prime-sample-btn');
-    if (!panel || !primeInput || !compositeInput || !saveBtn || !clearBtn || !sampleBtn) return;
+    const sampleSelect = document.getElementById('registered-prime-sample-select');
+    if (!panel || !primeInput || !compositeInput || !saveBtn || !clearBtn || !sampleBtn || !sampleSelect) return;
 
     const show = currentRoomRegistrationEnabled;
     panel.style.display = show ? 'block' : 'none';
@@ -995,6 +1043,7 @@ function syncRegisteredPrimePanel() {
     saveBtn.disabled = disabled;
     clearBtn.disabled = disabled;
     sampleBtn.disabled = disabled;
+    sampleSelect.disabled = disabled || registeredSampleOptions.length === 0;
 }
 
 function saveRegisteredPrimes() {
@@ -1019,14 +1068,21 @@ function saveRegisteredPrimes() {
 
 function loadRegisteredPrimeSample() {
     const status = document.getElementById('registered-prime-status');
-    if (status) status.innerText = "サンプルを登録中...";
-    ws.send(JSON.stringify({type: "load_sample_registered_primes"}));
+    const sampleSelect = document.getElementById('registered-prime-sample-select');
+    const sampleKey = sampleSelect ? sampleSelect.value : undefined;
+    const sampleLabel = sampleSelect && sampleSelect.selectedOptions[0] ? sampleSelect.selectedOptions[0].text : "サンプル";
+    if (status) status.innerText = `${sampleLabel}を登録中...`;
+    ws.send(JSON.stringify({type: "load_sample_registered_primes", sample_key: sampleKey}));
 }
 
 function renderRegisteredPrimeStatus(msg) {
     const status = document.getElementById('registered-prime-status');
     const primeInput = document.getElementById('registered-prime-input');
     const compositeInput = document.getElementById('registered-composite-input');
+    const sampleSelect = document.getElementById('registered-prime-sample-select');
+    if (msg.sample_key && sampleSelect) {
+        sampleSelect.value = msg.sample_key;
+    }
     if (msg.sample_prime_text && primeInput) {
         primeInput.value = msg.sample_prime_text;
         localStorage.setItem("primeqk_registered_prime_text", primeInput.value);
@@ -1365,7 +1421,8 @@ function startGame() {
 }
 
 function addCpu() {
-    ws.send(JSON.stringify({type: "add_cpu"}));
+    const select = document.getElementById('cpu-profile-select');
+    ws.send(JSON.stringify({type: "add_cpu", cpu_key: select && select.value ? select.value : "basic"}));
 }
 
 function removeCpu() {
