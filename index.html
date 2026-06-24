@@ -785,6 +785,12 @@ function showConnectionStatus(message) {
     appendSystemMessage(message);
 }
 
+function requestRoomCounts() {
+    if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({type: "get_room_counts"}));
+    }
+}
+
 function updatePlayButtonState() {
     const playBtn = document.getElementById('play-btn');
     if (!playBtn) return;
@@ -1007,6 +1013,7 @@ function leaveRoom() {
     stopTurnTimer();
     updateCpuControls();
     setState("room-list");
+    requestRoomCounts();
 }
 
 function renderRegisteredSampleOptions() {
