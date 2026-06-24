@@ -568,7 +568,10 @@ ws.onmessage = (event) => {
         }
         // 人の出入りがあったとき、ゲーム開始時に実行
         // 開始ボタンの表示にのみ関与
-        document.getElementById('start-btn').style.display = msg.waiting_count == 2 && isWaiting ? 'inline' : 'none';
+        const canStart = isWaiting && (msg.waiting_count === 1 || msg.waiting_count === 2);
+        const startBtn = document.getElementById('start-btn');
+        startBtn.style.display = canStart ? 'inline' : 'none';
+        startBtn.innerText = msg.waiting_count === 1 ? '1人で開始' : '開始する';
     }
     else if (msg.type === "room_state_initialization") {
         // 入室時にのみ実行
