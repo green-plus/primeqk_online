@@ -255,6 +255,8 @@
         状態: <span id="player-status">観戦中</span>
         <button id="status-btn">参加する</button>
         <button id="start-btn" style="display:none;">開始する</button>
+        <button id="add-cpu-btn" style="display:none;">CPU追加</button>
+        <button id="remove-cpu-btn" style="display:none;">CPU退出</button>
         <button id="leave-btn">退室する</button>
     </div>
     <div>参加者一覧: <span id="player-list"></span></div>
@@ -372,6 +374,8 @@ let currentRoomAllowComposite = false;
 let currentRoomPrimeRule = null;
 let currentRoomAssistEnabled = false;
 let currentRoomRegistrationEnabled = false;
+let currentRoomHasCpu = false;
+let currentRoomState = "waiting";
 let isWaiting = false;
 let playerId = null;
 let playerName = null;
@@ -542,6 +546,8 @@ ws.onmessage = (event) => {
         updateRoomDisplay();
 
         if (currentRoom === msg.room_id) {
+            currentRoomHasCpu = Array.isArray(msg.player_list) && msg.player_list.some(p => p.is_cpu);
+            updateCpuControls();
             if (typeof msg.registration_enabled === "boolean") {
                 currentRoomRegistrationEnabled = msg.registration_enabled;
                 syncRegisteredPrimePanel();
@@ -557,6 +563,7 @@ ws.onmessage = (event) => {
             }
             const playerList = msg.player_list.map(p => {
                 let text = p.name.toString();
+                if (p.is_cpu) text += "(CPU)";
                 if (p.id === playerId) text += "(自分)";
                 if (currentRoomRegistrationEnabled) {
                     text += `[素${p.registered_prime_count || 0}/合${p.registered_composite_count || 0}]`;
@@ -596,8 +603,12 @@ ws.onmessage = (event) => {
             schedulePrimeAssist();
         }
         if (msg.room_state === "waiting") {
+            currentRoomState = "waiting";
+            updateCpuControls();
             setState("in-room");
         } else if (msg.room_state === "playing") {
+            currentRoomState = "playing";
+            updateCpuControls();
             setState("playing");
         }
     }
@@ -622,6 +633,8 @@ ws.onmessage = (event) => {
         if (typeof msg.assist_enabled === "boolean") {
             currentRoomAssistEnabled = msg.assist_enabled;
         }
+        currentRoomState = "playing";
+        updateCpuControls();
         setState("playing");
     }
     else if (msg.type === "deal") {
@@ -669,6 +682,11 @@ ws.onmessage = (event) => {
         if (typeof msg.assist_enabled === "boolean") {
             currentRoomAssistEnabled = msg.assist_enabled;
         }
+        currentRoomState = msg.state || currentRoomState;
+        if (Array.isArray(msg.player_list)) {
+            currentRoomHasCpu = msg.player_list.some(p => p.is_cpu);
+        }
+        updateCpuControls();
         const handCounts = msg.hand_counts
             .map(h => `${h.name}: ${h.count}枚`)
             .join("  ");
@@ -708,6 +726,8 @@ ws.onmessage = (event) => {
         // ゲーム終了時の処理
         // ログはlog_chatで送信
         clearLocalHandState();
+        currentRoomState = msg.state || "waiting";
+        updateCpuControls();
         setState("in-room");
     }
     else if (msg.type === "score_record") {
@@ -909,9 +929,20 @@ function updateRoomDescription() {
     if (!description) panel.open = false;
 }
 
+function updateCpuControls() {
+    const addBtn = document.getElementById('add-cpu-btn');
+    const removeBtn = document.getElementById('remove-cpu-btn');
+    if (!addBtn || !removeBtn) return;
+    const canEditCpu = !!currentRoom && currentRoomState !== "playing";
+    addBtn.style.display = canEditCpu && !currentRoomHasCpu ? 'inline' : 'none';
+    removeBtn.style.display = canEditCpu && currentRoomHasCpu ? 'inline' : 'none';
+}
+
 function joinRoom(roomId) {
     ws.send(JSON.stringify({type: "join_room", room_id: roomId}));
     currentRoom = roomId;
+    currentRoomState = "waiting";
+    currentRoomHasCpu = false;
 
     const ruleLabel = roomRules[roomId] || "";
     document.getElementById('current-room').innerText =
@@ -924,6 +955,7 @@ function joinRoom(roomId) {
     updateRoomDescription();
     syncCompositeAvailability();
     syncRegisteredPrimePanel();
+    updateCpuControls();
     // 状態更新はサーバーからの room_state_initialization メッセージで行う
 }
 
@@ -938,8 +970,11 @@ function leaveRoom() {
     currentRoomPrimeRule = null;
     currentRoomAssistEnabled = false;
     currentRoomRegistrationEnabled = false;
+    currentRoomHasCpu = false;
+    currentRoomState = "waiting";
     clearLocalHandState();
     stopTurnTimer();
+    updateCpuControls();
     setState("room-list");
 }
 
@@ -1327,6 +1362,14 @@ function toggleStatus() {
 
 function startGame() {
     ws.send(JSON.stringify({type: "start_game"}));
+}
+
+function addCpu() {
+    ws.send(JSON.stringify({type: "add_cpu"}));
+}
+
+function removeCpu() {
+    ws.send(JSON.stringify({type: "remove_cpu"}));
 }
 
 function renderHand() {
@@ -1759,6 +1802,8 @@ document.getElementById('name-btn').onclick = () => {
 document.getElementById('status-btn').onclick = toggleStatus;
 document.getElementById('leave-btn').onclick = leaveRoom;
 document.getElementById('start-btn').onclick = startGame;
+document.getElementById('add-cpu-btn').onclick = addCpu;
+document.getElementById('remove-cpu-btn').onclick = removeCpu;
 document.getElementById('chat-btn').onclick = () => {
     const chatInput = document.getElementById('chat-input');
     ws.send(JSON.stringify({type: "chat", message: chatInput.value}));
@@ -1816,7 +1861,9 @@ function setState(state) {
         document.getElementById('state-common').style.display = 'none';
         document.getElementById('state-game').style.display = 'none';
         document.getElementById('chat').style.display = 'none';
+        currentRoomState = "waiting";
     } else if (state === "in-room") {
+        currentRoomState = "waiting";
         document.getElementById('state-room-list').style.display = 'none';
         document.getElementById('state-common').style.display = 'block';
         document.getElementById('state-game').style.display = 'none';
@@ -1831,6 +1878,7 @@ function setState(state) {
         document.getElementById('status-btn').style.display = 'inline';
         document.getElementById('start-btn').style.display = 'none';
     } else if (state === "playing") {
+        currentRoomState = "playing";
         document.getElementById('state-room-list').style.display = 'none';
         document.getElementById('state-common').style.display = 'block';
         document.getElementById('state-game').style.display = 'block';
@@ -1855,6 +1903,7 @@ function setState(state) {
         document.getElementById('start-btn').style.display = 'none';
     }
     syncRegisteredPrimePanel();
+    updateCpuControls();
     updatePlayButtonState();
 }
 
