@@ -527,6 +527,9 @@ ws.onmessage = (event) => {
         roomCounts = msg.counts;
           if (msg.rules) roomRules = msg.rules; // ここで初期化
           if (msg.room_categories) roomCategories = msg.room_categories;
+          if (msg.room_category_descriptions) {
+              Object.assign(roomCategoryDescriptions, msg.room_category_descriptions);
+          }
           if (msg.allow_composite) roomCompositeFlags = msg.allow_composite;
           if (msg.prime_rules) roomPrimeRules = msg.prime_rules;
           if (msg.assist_enabled) roomAssistFlags = msg.assist_enabled;
@@ -756,11 +759,9 @@ ws.onmessage = (event) => {
         renderPrimeAssist(msg);
     }
     else if (msg.type === "chat") {
-        const chatBox = document.getElementById('chat-box');
         const line = document.createElement('div');
         line.textContent = `${msg.sender}: ${msg.message}`;
-        chatBox.appendChild(line);
-        chatBox.scrollTop = chatBox.scrollHeight;
+        prependChatEntry(line);
     }
     else if (msg.type === "error") {
         alert(msg.message);
@@ -768,12 +769,23 @@ ws.onmessage = (event) => {
 };
 
 function appendSystemMessage(message) {
-    const chatBox = document.getElementById('chat-box');
-    if (!chatBox) return;
     const line = document.createElement('div');
     line.textContent = `system: ${message}`;
-    chatBox.appendChild(line);
-    chatBox.scrollTop = chatBox.scrollHeight;
+    prependChatEntry(line);
+}
+
+function prependChatEntry(entry) {
+    const chatBox = document.getElementById('chat-box');
+    if (!chatBox) return;
+
+    const wasViewingLatest = chatBox.scrollTop <= 4;
+    const previousHeight = chatBox.scrollHeight;
+    chatBox.prepend(entry);
+    if (wasViewingLatest) {
+        chatBox.scrollTop = 0;
+        return;
+    }
+    chatBox.scrollTop += chatBox.scrollHeight - previousHeight;
 }
 
 function showConnectionStatus(message) {
@@ -820,8 +832,7 @@ function renderScoreRecord(msg) {
     });
     details.appendChild(body);
 
-    chatBox.appendChild(details);
-    chatBox.scrollTop = chatBox.scrollHeight;
+    prependChatEntry(details);
 }
 
 function clearLocalHandState() {
